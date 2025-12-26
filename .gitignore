@@ -209,3 +209,5 @@ __marimo__/
 *.zst
 data
 unsloth_compiled_cache
+logs/
+models/

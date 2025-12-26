@@ -26,10 +26,12 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
     "stockfish>=3.28.0",
+    "tensorboard>=2.20.0",
+    "tensorboardx>=2.6.4",
     "torch>=2.9.0",
     "transformers>=4.57.3",
     "trl>=0.26.2",
     "trueskill>=0.4.5",
-    "vllm>=0.13.0",
+    "vllm<=0.11.2",
     "zstandard>=0.25.0",
 ]
