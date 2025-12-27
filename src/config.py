@@ -1,0 +1,5 @@
+name_used = "rationale"
+rationale_tag = f"<{name_used}>"
+move_tag = "<uci_move>"
+close_rationale_tag = f"</{name_used}>"
+close_move_tag = "</uci_move>"
