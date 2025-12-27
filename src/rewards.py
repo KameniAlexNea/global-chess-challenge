@@ -1,4 +1,40 @@
+import chess
+import chess.engine
+import os
+from typing import Optional
 from src.utils import extract_xml_answer
+
+# Global Stockfish instance for efficiency
+_stockfish_engine: Optional[chess.engine.SimpleEngine] = None
+
+
+def get_stockfish_engine():
+    """Get or create a global Stockfish engine instance."""
+    global _stockfish_engine
+    if _stockfish_engine is None:
+        # Find Stockfish binary
+        stockfish_paths = [
+            # "/usr/local/bin/stockfish",
+            # "/usr/bin/stockfish",
+            # "/opt/homebrew/bin/stockfish",
+            "/usr/games/stockfish",
+        ]
+        stockfish_path = None
+        for path in stockfish_paths:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                stockfish_path = path
+                break
+
+        if stockfish_path is None:
+            raise RuntimeError(
+                "Stockfish binary not found. Install with: apt-get install stockfish"
+            )
+
+        _stockfish_engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        _stockfish_engine.configure({"Threads": 1, "Hash": 64})
+
+    return _stockfish_engine
+
 
 def format_reward_func(completions, **kwargs):
     """
@@ -56,4 +92,92 @@ def correctness_reward_func(completions, correct_move, **kwargs):
                 rewards.append(-0.5)  # Small penalty for wrong move
         except:
             rewards.append(-0.5)
+    return rewards
+
+
+def stockfish_eval_reward_func(
+    completions, correct_move, fen, legal_moves, depth=5, **kwargs
+):
+    """
+    Continuous reward based on Stockfish evaluation.
+    Compares move quality using centipawn evaluation from current position.
+    """
+    rewards = []
+
+    try:
+        engine = get_stockfish_engine()
+    except RuntimeError as e:
+        print(f"Warning: {e}. Falling back to binary correctness reward.")
+        return correctness_reward_func(completions, correct_move, **kwargs)
+
+    for completion, correct, position_fen, legal in zip(
+        completions, correct_move, fen, legal_moves
+    ):
+        try:
+            _, move, _ = extract_xml_answer(completion)
+
+            if move is None:
+                rewards.append(-3.0)  # Failed to extract
+                continue
+
+            if move not in legal:
+                rewards.append(-4.0)  # Illegal move
+                continue
+
+            board = chess.Board(position_fen)
+
+            # Analyze the predicted move
+            info_pred = engine.analyse(
+                board,
+                chess.engine.Limit(depth=depth),
+                root_moves=[chess.Move.from_uci(move)],
+            )
+            score_pred = info_pred["score"].relative
+
+            # Analyze the correct move (could be cached for efficiency)
+            info_correct = engine.analyse(
+                board,
+                chess.engine.Limit(depth=depth),
+                root_moves=[chess.Move.from_uci(correct)],
+            )
+            score_correct = info_correct["score"].relative
+
+            # Convert to centipawns using built-in method
+            cp_pred = score_pred.score(mate_score=10000)
+            cp_correct = score_correct.score(mate_score=10000)
+
+            # Special handling for mate positions
+            if abs(cp_correct) >= 9000:  # Correct move is mate/getting mated
+                if abs(cp_pred) >= 9000:  # Predicted is also mate
+                    reward = 3.0
+                elif cp_pred * cp_correct > 0 and abs(cp_pred) > 200:
+                    # Same side, winning position
+                    reward = 1.5
+                else:
+                    reward = -1.0
+            else:
+                # Normal centipawn comparison
+                cp_loss = cp_correct - cp_pred
+
+                # Reward scaling
+                if cp_loss <= 0:
+                    reward = 3.0
+                elif cp_loss < 25:
+                    reward = 2.5
+                elif cp_loss < 75:
+                    reward = 2.0 - (cp_loss - 25) / 50 * 0.5  # 2.0 → 1.5
+                elif cp_loss < 150:
+                    reward = 1.5 - (cp_loss - 75) / 75 * 1.0  # 1.5 → 0.5
+                elif cp_loss < 300:
+                    reward = 0.5 - (cp_loss - 150) / 150 * 1.0  # 0.5 → -0.5
+                else:
+                    # Cap at -2.0 for very bad moves
+                    reward = max(-2.0, -0.5 - (cp_loss - 300) / 400)
+
+            rewards.append(reward)
+
+        except Exception as e:
+            print(f"Error in stockfish eval: {e}")
+            rewards.append(-1.0)
+
     return rewards

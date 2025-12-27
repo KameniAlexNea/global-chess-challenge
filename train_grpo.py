@@ -15,6 +15,7 @@ from src.rewards import (
     format_reward_func,
     legality_reward_func,
     correctness_reward_func,
+    stockfish_eval_reward_func,
 )
 
 model_name = "alexneakameni/Qwen3-4B-Instruct-2507-chess-grpo"
@@ -98,7 +99,7 @@ print("Config ready!")
 
 trainer = GRPOTrainer(
     model=model_config.model_name_or_path,
-    reward_funcs=[format_reward_func, legality_reward_func, correctness_reward_func],
+    reward_funcs=[format_reward_func, legality_reward_func, stockfish_eval_reward_func],
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=test_dataset,

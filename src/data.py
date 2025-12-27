@@ -48,6 +48,7 @@ def load_chess_dataset(
             "prompt": prompts,
             "correct_move": [out["move"] for out in outputs],
             "legal_moves": [inp["legal_moves"] for inp in inputs],
+            "fen": [inp["fen"] for inp in inputs],
             "puzzle_id": [meta["puzzle_id"] for meta in metadatas],
             "rating": [meta["rating"] for meta in metadatas],
         }
