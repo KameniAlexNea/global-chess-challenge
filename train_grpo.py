@@ -19,7 +19,6 @@ from src.rewards import (
 
 model_name = "alexneakameni/Qwen3-4B-Instruct-2507-chess-grpo"
 model_name = "unsloth/Qwen3-4B-Instruct-2507"
-# model_name = "unsloth/Qwen3-1.7B"
 
 name_used = "rationale"
 rationale_tag = f"<{name_used}>"
