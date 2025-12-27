@@ -1,22 +1,25 @@
 # %% [markdown]
 # ## 1. Setup Environment
 
+import os
 
-# %%
-# from huggingface_hub import login
-
-# Login to Hugging Face
-# login(token="", add_to_git_credential=True)  # ADD YOUR TOKEN HERE
-
-# %% [markdown]
-# ## 2. Load and Prepare Chess Puzzle Dataset
+os.environ["WANDB_PROJECT"] = "global-chess-challenge"
+os.environ["WANDB_WATCH"] = "none"
 
 # %%
 import json
-from datasets import load_dataset, Dataset
+from datasets import load_dataset
 from transformers import AutoTokenizer
 
+model_name = "alexneakameni/Qwen3-4B-Instruct-2507-chess-grpo"
 model_name = "unsloth/Qwen3-4B-Instruct-2507"
+model_name = "unsloth/Qwen3-1.7B"
+
+name_used = "rationale"
+rationale_tag = f"<{name_used}>"
+move_tag = "<uci_move>"
+close_rationale_tag = f"</{name_used}>"
+close_move_tag = "</uci_move>"
 
 # Load your extracted puzzles - proper streaming, not amateur list loading
 puzzle_file = "data/processed/chess_puzzles_231961.jsonl"
@@ -46,17 +49,23 @@ def format_chess_prompt(puzzle_data):
     inp = puzzle_data["input"]
 
     # System message
-    system_msg = "You are a chess expert. Analyze positions carefully and find the best tactical move."
+    system_msg = "You are a chess expert. Analyze positions carefully and find the best tactical move from legal moves."
 
     # User prompt - NO themes (not available during inference)
     user_msg = f"""Analyze this chess position and find the BEST move.
 
-Position (FEN): {inp['fen']}
+Position (FEN): 
+{inp['fen']}
+
+Briefly, FEN describes chess pieces by single letters [PNBRKQ] for white and [pnbrkq] for black. The pieces found in each rank are specified, starting at the top of the board (a8..h8) and describing all eight ranks. Within each rank, all 8 positions must be specified, with one or more empty squares noted with a digit [1..8]. For example, /8/ is an empty rank (no pieces), while /4P3/ specifies four empty squares, a white pawn, and three more empty squares.
+
 Side to move: {inp['side_to_move']}
 Legal moves: {' '.join(inp['legal_moves'])}
 
-Explain your reasoning in <rationale> tags, then provide the move in <uci_move> tags.
-Example: <rationale>Fork attacking king and queen</rationale><uci_move>f2g3</uci_move>"""
+Your task is to select the best move from legal moves for the side to move.
+
+Explain in one sentence your reasoning in {rationale_tag} tags, then provide the move in {move_tag} tags.
+Example: {rationale_tag}Fork attacking king and queen{close_rationale_tag}{move_tag}f2g3{close_move_tag}"""
 
     messages = [
         {"role": "system", "content": system_msg},
@@ -112,15 +121,13 @@ def extract_xml_answer(text):
     Returns: (rationale, move, has_correct_format)
     """
     # Strategy 1: Strict XML format
-    strict_regex = r"<rationale>([^<]*(?:<(?!/?rationale>)[^<]*)*)</rationale>\s*<uci_move>([^<]+)</uci_move>"
+    strict_regex = rf"{rationale_tag}([^<]*(?:<(?!/?{name_used}>)[^<]*)*){close_rationale_tag}\s*{move_tag}([^<]+){close_move_tag}"
     match = re.search(strict_regex, text, re.DOTALL)
     if match:
         return match.group(1).strip(), match.group(2).strip(), True
 
     # Strategy 2: Loose XML - allow newlines/spaces inside tags AND chatter between tags
-    loose_regex = (
-        r"<rationale>\s*(.+?)\s*</rationale>.*?<uci_move>\s*(.+?)\s*</uci_move>"
-    )
+    loose_regex = rf"{rationale_tag}\s*(.+?)\s*{close_rationale_tag}.*?{move_tag}\s*(.+?)\s*{close_move_tag}"
     match = re.search(loose_regex, text, re.DOTALL)
     if match:
         return match.group(1).strip(), match.group(2).strip(), True
@@ -193,13 +200,13 @@ def correctness_reward_func(completions, correct_move, **kwargs):
 
 # %%
 # Test samples
-correct_sample = """<rationale>I see that the bishop on f2 can capture the rook on g3, winning material.</rationale>
-<uci_move>f2g3</uci_move>"""
+correct_sample = f"""{rationale_tag}I see that the bishop on f2 can capture the rook on g3, winning material.{close_rationale_tag}
+{move_tag}f2g3{close_move_tag}"""
 
 wrong_format = """The best move is f2g3 because it wins the rook."""
 
-illegal_move = """<rationale>Moving the pawn forward.</rationale>
-<uci_move>z9z9</uci_move>"""
+illegal_move = f"""{rationale_tag}Moving the pawn forward.{close_rationale_tag}
+{move_tag}z9z9{close_move_tag}"""
 
 # Test
 test_completions = [correct_sample, wrong_format, illegal_move]
@@ -228,18 +235,18 @@ model_config = ModelConfig(
     dtype="bfloat16",
     attn_implementation="flash_attention_2",
     use_peft=True,
-    load_in_4bit=False,
+    load_in_4bit=True,
 )
 
 # GRPO Training config
 training_args = GRPOConfig(
-    output_dir="models/chess-grpo-qwen3",
+    output_dir="models/chess-grpo-qwen3-challenge",
     learning_rate=1e-5,
     lr_scheduler_type="cosine",
-    logging_steps=10,
-    max_steps=1000,  # Validation run - check if loss goes down before committing to marathon
+    logging_steps=20,
+    max_steps=3000,  # Validation run - check if loss goes down before committing to marathon
     per_device_train_batch_size=4,
-    gradient_accumulation_steps=4,
+    gradient_accumulation_steps=2,
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
@@ -251,8 +258,7 @@ training_args = GRPOConfig(
     # Logging
     report_to="wandb",
     logging_dir="./logs",
-    # vllm - disabled due to server startup issues
-    use_vllm=False,
+    save_steps=300,
 )
 
 print("Config ready!")
