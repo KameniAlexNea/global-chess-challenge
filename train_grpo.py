@@ -18,8 +18,7 @@ from src.rewards import (
     stockfish_eval_reward_func,
 )
 
-model_name = "alexneakameni/Qwen3-4B-Instruct-2507-chess-grpo"
-model_name = "unsloth/Qwen3-4B-Instruct-2507"
+model_name = "unsloth/granite-4.0-h-micro"
 
 name_used = "rationale"
 rationale_tag = f"<{name_used}>"

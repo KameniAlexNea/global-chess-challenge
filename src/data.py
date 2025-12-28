@@ -37,7 +37,7 @@ def load_chess_dataset(
             prompt = user_msg.format(
                 FEN=inp["fen"],
                 side_to_move=inp["side_to_move"],
-                legal_moves_uci=", ".join(inp["legal_moves"]),
+                legal_moves_uci=" ".join(inp["legal_moves"]),
             )
             messages = [{"role": "user", "content": prompt}]
             prompts.append(tokenizer.apply_chat_template(

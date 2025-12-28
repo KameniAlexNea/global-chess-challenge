@@ -37,10 +37,8 @@ Output ONLY the following, with no preamble, checklist, or extra text:
 1. `{rationale_tag}...{close_rationale_tag}` - A single concise sentence explaining your move choice
 2. `{move_tag}...{close_move_tag}` - The selected move in UCI format
 
-If no legal moves exist, output only:
-`{rationale_tag}Checkmate: no legal moves available{close_rationale_tag}`
-OR
-`{rationale_tag}Stalemate: no legal moves available{close_rationale_tag}`
+If no legal moves exist, output only: use 0000 for null moves
+`{rationale_tag}no legal moves available{close_rationale_tag}{move_tag}0000{close_move_tag}`
 
 Do NOT include any other text, explanations, or formatting.
 """
