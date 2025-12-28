@@ -2,6 +2,8 @@ import os
 
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
+os.environ["WANDB_DISABLE_CODE"] = "true"
+os.environ["WANDB_DISABLE_SERVICE"] = "true"
 
 import random
 

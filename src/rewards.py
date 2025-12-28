@@ -114,7 +114,7 @@ def correctness_reward_func(completions, correct_move, **kwargs):
 
 
 def stockfish_eval_reward_func(
-    completions, correct_move, fen, legal_moves, depth=5, **kwargs
+    completions, correct_move, fen, legal_moves, depth=3, **kwargs
 ):
     """
     Continuous reward based on Stockfish evaluation.
