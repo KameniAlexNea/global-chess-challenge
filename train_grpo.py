@@ -9,8 +9,10 @@ from transformers import AutoTokenizer
 
 import torch
 from transformers import AutoModelForCausalLM
-from trl import GRPOConfig, GRPOTrainer, ModelConfig, get_peft_config
+from trl import GRPOConfig, GRPOTrainer
+from peft import LoraConfig
 from src.data import load_chess_dataset
+from src.tokenizer_utils import ensure_chat_template
 from src.rewards import (
     format_reward_func,
     legality_reward_func,
@@ -18,7 +20,9 @@ from src.rewards import (
     stockfish_eval_reward_func,
 )
 
-model_name = "unsloth/granite-4.0-h-micro"
+model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
+model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
+model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
 
 name_used = "rationale"
 rationale_tag = f"<{name_used}>"
@@ -27,6 +31,7 @@ close_rationale_tag = f"</{name_used}>"
 close_move_tag = "</uci_move>"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = ensure_chat_template(tokenizer)
 
 train_dataset, test_dataset = load_chess_dataset(tokenizer)
 
@@ -56,14 +61,6 @@ print(
     correctness_reward_func(test_completions, correct_move=test_correct),
 )
 
-# Model config
-model_config = ModelConfig(
-    model_name_or_path=model_name,
-    dtype="bfloat16",
-    attn_implementation="flash_attention_2",
-    use_peft=True,
-    load_in_4bit=True,
-)
 
 # GRPO Training config
 training_args = GRPOConfig(
@@ -79,10 +76,10 @@ training_args = GRPOConfig(
     bf16=True,
     # GRPO specific
     max_completion_length=256,
-    num_generations=16,  # Generate 16 solutions per puzzle
-    beta=0.001,  # KL coefficient
+    num_generations=16,  # Generate 8 solutions per puzzle
+    beta=0.003,  # KL coefficient
     top_k=30,
-    top_p=0.9,
+    top_p=0.8,
     temperature=0.7,
     # Logging
     report_to="wandb",
@@ -94,15 +91,25 @@ training_args = GRPOConfig(
 
 print("Config ready!")
 
+# Create LoRA config with target modules
+peft_config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+)
+
 # ## 6. Create Trainer and Start Training
 
 trainer = GRPOTrainer(
-    model=model_config.model_name_or_path,
+    model=model_name,
     reward_funcs=[format_reward_func, legality_reward_func, stockfish_eval_reward_func],
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=test_dataset,
-    peft_config=get_peft_config(model_config),
+    peft_config=peft_config,
 )
 
 print("Trainer created successfully!")
