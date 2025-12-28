@@ -25,6 +25,7 @@ from src.rewards import (
 model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
 model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
+model_name = "models/chess-sft-warmup"
 # NOTE: If you see zero loss, the model doesn't understand the output format yet.
 # Run train_sft_warmup.py FIRST to teach the format, then use:
 # model_name = "models/chess-sft-warmup"

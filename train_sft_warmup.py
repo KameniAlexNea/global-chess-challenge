@@ -11,15 +11,16 @@ os.environ["WANDB_WATCH"] = "none"
 os.environ["WANDB_DISABLE_CODE"] = "true"
 os.environ["WANDB_DISABLE_SERVICE"] = "true"
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
-from peft import LoraConfig, get_peft_model
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from datasets import load_dataset
 from src.tokenizer_utils import ensure_chat_template
 import torch
+from transformers import Qwen2TokenizerFast
 
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer: Qwen2TokenizerFast = AutoTokenizer.from_pretrained(model_name)
 tokenizer = ensure_chat_template(tokenizer)
 
 # Add padding token if missing
@@ -71,7 +72,7 @@ def format_for_sft(examples):
     # Tokenize
     model_inputs = tokenizer(
         texts,
-        max_length=512,
+        max_length=1024,
         truncation=True,
         padding="max_length",
         return_tensors="pt",
@@ -100,13 +101,22 @@ sft_eval = (
 
 print(f"SFT Train: {len(sft_train)} | SFT Eval: {len(sft_eval)}")
 
-# Load model with LoRA
+# Load model with 4-bit quantization
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+)
+
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    torch_dtype=torch.bfloat16,
+    quantization_config=bnb_config,
     device_map="auto",
-    load_in_4bit=True,
 )
+
+# Prepare model for k-bit training
+model = prepare_model_for_kbit_training(model)
 
 # Apply LoRA
 peft_config = LoraConfig(
@@ -127,7 +137,7 @@ peft_config = LoraConfig(
 )
 model = get_peft_model(model, peft_config)
 
-print(f"Trainable parameters: {model.print_trainable_parameters()}")
+model.print_trainable_parameters()
 
 # SFT Training config
 training_args = TrainingArguments(
