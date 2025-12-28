@@ -170,9 +170,17 @@ trainer = Trainer(
 print("Starting SFT warmup training...")
 trainer.train()
 
-# Save the warmed up model
-trainer.save_model(training_args.output_dir)
+# Save the adapter
+adapter_path = training_args.output_dir + "/adapter"
+model.save_pretrained(adapter_path)
+tokenizer.save_pretrained(adapter_path)
+
+# Merge adapter with base model and save full model
+print("Merging adapter with base model...")
+model = model.merge_and_unload()
+model.save_pretrained(training_args.output_dir)
 tokenizer.save_pretrained(training_args.output_dir)
+print(f"Full model saved to {training_args.output_dir}")
 print(f"Model saved to {training_args.output_dir}")
 
 print("\n" + "=" * 80)

@@ -25,7 +25,7 @@ from src.rewards import (
 model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
 model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
-model_name = "models/chess-sft-warmup"
+model_name = "models/chess-sft-warmup-merged"
 # NOTE: If you see zero loss, the model doesn't understand the output format yet.
 # Run train_sft_warmup.py FIRST to teach the format, then use:
 # model_name = "models/chess-sft-warmup"
@@ -36,7 +36,7 @@ move_tag = "<uci_move>"
 close_rationale_tag = f"</{name_used}>"
 close_move_tag = "</uci_move>"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
 tokenizer = ensure_chat_template(tokenizer)
 
 train_dataset, test_dataset = load_chess_dataset(tokenizer)
@@ -123,9 +123,17 @@ print("Trainer created successfully!")
 # Start training
 trainer.train()
 
-# Save the model
-trainer.save_model(training_args.output_dir)
-print(f"Model saved to {training_args.output_dir}")
+# Save the adapter
+adapter_path = training_args.output_dir + "/adapter"
+trainer.model.save_pretrained(adapter_path)
+tokenizer.save_pretrained(adapter_path)
+
+# Merge adapter with base model and save full model
+print("Merging adapter with base model...")
+model = trainer.model.merge_and_unload()
+model.save_pretrained(training_args.output_dir)
+tokenizer.save_pretrained(training_args.output_dir)
+print(f"Full model saved to {training_args.output_dir}")
 
 # ## 7. Test the Trained Model
 
