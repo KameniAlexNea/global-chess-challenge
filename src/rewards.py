@@ -123,12 +123,6 @@ def stockfish_eval_reward_func(
     """
     rewards = []
 
-    try:
-        engine = get_stockfish_engine()
-    except RuntimeError as e:
-        print(f"Warning: {e}. Falling back to binary correctness reward.")
-        return correctness_reward_func(completions, correct_move, **kwargs)
-
     for completion, correct, position_fen, legal in zip(
         completions, correct_move, fen, legal_moves
     ):
