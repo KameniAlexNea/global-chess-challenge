@@ -51,6 +51,7 @@ def load_chess_dataset(
             "fen": [inp["fen"] for inp in inputs],
             "puzzle_id": [meta["puzzle_id"] for meta in metadatas],
             "rating": [meta["rating"] for meta in metadatas],
+            "themes": [meta["themes"] for meta in metadatas],
         }
 
     # Test the formatting with a single sample wrapped as a batch

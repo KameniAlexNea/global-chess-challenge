@@ -25,6 +25,9 @@ from src.rewards import (
 model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
 model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
+# NOTE: If you see zero loss, the model doesn't understand the output format yet.
+# Run train_sft_warmup.py FIRST to teach the format, then use:
+# model_name = "models/chess-sft-warmup"
 
 name_used = "rationale"
 rationale_tag = f"<{name_used}>"
@@ -67,22 +70,22 @@ print(
 # GRPO Training config
 training_args = GRPOConfig(
     output_dir="models/chess-grpo-qwen3-challenge",
-    learning_rate=2e-5,
+    learning_rate=5e-6,  # Lower LR for stability
     lr_scheduler_type="cosine",
     logging_steps=20,
-    max_steps=3000,  # Validation run - check if loss goes down before committing to marathon
-    per_device_train_batch_size=8,
-    gradient_accumulation_steps=2,
+    max_steps=3000,
+    per_device_train_batch_size=4,  # Smaller batch for more diverse samples
+    gradient_accumulation_steps=4,  # Keep same effective batch
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
     # GRPO specific
-    max_completion_length=256,
-    num_generations=16,  # Generate 8 solutions per puzzle
-    beta=0.003,  # KL coefficient
-    top_k=30,
-    top_p=0.8,
-    temperature=0.7,
+    max_completion_length=128,  # Reduced - need ~50 tokens max for answer
+    num_generations=16,
+    beta=0.01,  # Higher KL penalty to stay close to base model
+    top_k=50,  # More diverse sampling
+    top_p=0.95,
+    temperature=1.0,  # Higher temperature for more exploration
     # Logging
     report_to="wandb",
     logging_dir="./logs",
