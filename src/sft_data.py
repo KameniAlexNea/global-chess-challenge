@@ -341,7 +341,9 @@ def load_sft_sequences_dataset(
     seed: int = 42,
 ):
     """
-    Load and preprocess chess move sequences for SFT training.
+    Load and preprocess chess move sequences for SFT training with label masking.
+
+    Only tokens between <uci_move> and </uci_move> are trained (labels != -100).
 
     Args:
         tokenizer: The tokenizer to use
@@ -356,8 +358,35 @@ def load_sft_sequences_dataset(
         Tuple of (train_dataset, eval_dataset) ready for training
     """
 
+    # Get token IDs for "uci_move" - appears in both <uci_move> and </uci_move>
+    uci_move_tokens = tokenizer.encode("uci_move", add_special_tokens=False)
+
+    def find_subsequence(seq, subseq):
+        """Find all starting positions of subseq in seq."""
+        positions = []
+        for i in range(len(seq) - len(subseq) + 1):
+            if seq[i : i + len(subseq)] == subseq:
+                positions.append(i)
+        return positions
+
+    def find_move_token_positions(input_ids: list) -> list:
+        """Find positions of move tokens (between <uci_move> and </uci_move>)."""
+        # Find all occurrences of "uci_move" tokens
+        occurrences = find_subsequence(input_ids, uci_move_tokens)
+
+        # Pair them up: (open, close), (open, close), ...
+        positions = []
+        for i in range(0, len(occurrences) - 1, 2):
+            start = occurrences[i] + len(uci_move_tokens)  # After first uci_move
+            end = occurrences[i + 1]  # Before second uci_move
+            # Collect positions between (skip the > and </ tokens)
+            for pos in range(start, end):
+                positions.append(pos)
+
+        return positions
+
     def format_for_sft(example):
-        """Format a single example as a multi-turn conversation for SFT."""
+        """Format a single example as a multi-turn conversation for SFT with label masking."""
         line_data = {
             "fen": example["fen"],
             "line": example["line"],
@@ -368,7 +397,6 @@ def load_sft_sequences_dataset(
         result = create_conversation_example(line_data)
 
         if result is None:
-            # Return empty/padding for invalid examples
             return {
                 "input_ids": [tokenizer.pad_token_id] * max_length,
                 "attention_mask": [0] * max_length,
@@ -382,7 +410,7 @@ def load_sft_sequences_dataset(
             messages, tokenize=False, add_generation_prompt=False
         )
 
-        # Tokenize full conversation
+        # Tokenize
         full_tokens = tokenizer(
             full_text,
             max_length=max_length,
@@ -390,11 +418,16 @@ def load_sft_sequences_dataset(
             padding="max_length",
         )
 
-        # Create labels - train on everything (model learns the full pattern)
-        labels = full_tokens["input_ids"].copy()
+        input_ids = full_tokens["input_ids"]
+
+        # Create labels - only predict move tokens
+        labels = [-100] * len(input_ids)
+        move_positions = find_move_token_positions(input_ids)
+        for pos in move_positions:
+            labels[pos] = input_ids[pos]
 
         return {
-            "input_ids": full_tokens["input_ids"],
+            "input_ids": input_ids,
             "attention_mask": full_tokens["attention_mask"],
             "labels": labels,
         }
