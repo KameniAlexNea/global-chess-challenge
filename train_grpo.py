@@ -21,20 +21,12 @@ from src.rewards import (
     correctness_reward_func,
     stockfish_eval_reward_func,
 )
+from src.config import rationale_tag, move_tag, close_rationale_tag, close_move_tag
 
 model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
 model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
 model_name = "models/chess-sft-warmup-merged"
-# NOTE: If you see zero loss, the model doesn't understand the output format yet.
-# Run train_sft_warmup.py FIRST to teach the format, then use:
-# model_name = "models/chess-sft-warmup"
-
-name_used = "rationale"
-rationale_tag = f"<{name_used}>"
-move_tag = "<uci_move>"
-close_rationale_tag = f"</{name_used}>"
-close_move_tag = "</uci_move>"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
 tokenizer = ensure_chat_template(tokenizer)
@@ -104,7 +96,15 @@ peft_config = LoraConfig(
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+    target_modules=[
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    ],
 )
 
 # ## 6. Create Trainer and Start Training

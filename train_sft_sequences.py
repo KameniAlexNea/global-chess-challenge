@@ -43,7 +43,15 @@ if tokenizer.pad_token is None:
 
 # Load dataset
 dataset = load_dataset("json", data_files="data/processed/move_sequences_500mb.jsonl")
-dataset = dataset["train"].train_test_split(test_size=0.01, seed=42)
+full_dataset = dataset["train"]
+
+# Sample 1,000,000 for training (random subset)
+TRAIN_SAMPLES = 1_000_000
+if len(full_dataset) > TRAIN_SAMPLES:
+    full_dataset = full_dataset.shuffle(seed=42).select(range(TRAIN_SAMPLES))
+    print(f"Sampled {TRAIN_SAMPLES:,} examples from full dataset")
+
+dataset = full_dataset.train_test_split(test_size=0.01, seed=42)
 
 print(f"Loaded {len(dataset['train'])} train | {len(dataset['test'])} test lines")
 
@@ -97,48 +105,58 @@ Provide the best move in <uci_move> tags."""
     return {"prompt": prompt_text, "response": response}
 
 
-def format_for_sft(examples):
-    """Format for supervised learning."""
-    texts = []
+def format_for_sft(example):
+    """Format a single example for supervised learning."""
+    line_data = {
+        "fen": example["fen"],
+        "line": example["line"],
+        "depth": example["depth"],
+    }
 
-    for i in range(len(examples["fen"])):
-        line_data = {
-            "fen": examples["fen"][i],
-            "line": examples["line"][i],
-            "depth": examples["depth"][i],
-        }
+    # Create training example with random split
+    training_example = create_training_example(line_data)
 
-        # Create training example with random split
-        example = create_training_example(line_data)
+    # Format as chat
+    messages = [{"role": "user", "content": training_example["prompt"]}]
+    prompt = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
 
-        # Format as chat
-        messages = [{"role": "user", "content": example["prompt"]}]
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-
-        # Full text
-        full_text = prompt + example["response"] + tokenizer.eos_token
-        texts.append(full_text)
+    # Full text
+    full_text = prompt + training_example["response"] + tokenizer.eos_token
 
     # Tokenize (limit to 512 tokens total: ~480 input + ~32 response)
     model_inputs = tokenizer(
-        texts,
+        full_text,
         max_length=512,
         truncation=True,
         padding="max_length",
-        return_tensors="pt",
     )
 
     # Set labels
-    model_inputs["labels"] = model_inputs["input_ids"].clone()
+    model_inputs["labels"] = model_inputs["input_ids"].copy()
 
     return model_inputs
 
-# Apply transform on-the-fly (no preprocessing wait time)
-print("Setting up on-the-fly transforms...")
-sft_train = dataset["train"].with_transform(format_for_sft)
-sft_eval = dataset["test"].with_transform(format_for_sft)
+
+# Preprocess data upfront with .map() (faster than on-the-fly transforms)
+print("Preprocessing dataset with .map()...")
+sft_train = dataset["train"].map(
+    format_for_sft,
+    remove_columns=dataset["train"].column_names,
+    num_proc=16,
+    desc="Formatting train set",
+)
+sft_eval = dataset["test"].map(
+    format_for_sft,
+    remove_columns=dataset["test"].column_names,
+    num_proc=16,
+    desc="Formatting eval set",
+)
+
+# Set format for PyTorch
+sft_train.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+sft_eval.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
 
 print(f"SFT Train: {len(sft_train)} | SFT Eval: {len(sft_eval)}")
 
@@ -184,7 +202,7 @@ model.print_trainable_parameters()
 # Training config
 training_args = TrainingArguments(
     output_dir="models/chess-sft-sequences",
-    num_train_epochs=2,
+    num_train_epochs=1,
     per_device_train_batch_size=16,  # Balanced for device_map auto
     gradient_accumulation_steps=4,
     learning_rate=2e-4,
@@ -199,7 +217,7 @@ training_args = TrainingArguments(
     report_to="wandb",
     run_name="chess-sft-sequences-v2",
     remove_unused_columns=False,
-    dataloader_num_workers=8,  # Parallel data loading
+    dataloader_num_workers=16,
     dataloader_pin_memory=True,
 )
 
