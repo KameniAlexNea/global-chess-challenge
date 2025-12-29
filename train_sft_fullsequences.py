@@ -30,8 +30,9 @@ from transformers import (
 from src.sft_data import load_sft_sequences_dataset
 
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
+model_name = "models/chess-grpo-sft-merged"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
 
 # Add padding token if missing
 if tokenizer.pad_token is None:

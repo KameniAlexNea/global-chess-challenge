@@ -370,18 +370,19 @@ def load_sft_sequences_dataset(
         return positions
 
     def find_move_token_positions(input_ids: list) -> list:
-        """Find positions of move tokens (between <uci_move> and </uci_move>)."""
+        """Find positions of move tokens (full <uci_move>...</uci_move> tags)."""
         # Find all occurrences of "uci_move" tokens
         occurrences = find_subsequence(input_ids, uci_move_tokens)
 
         # Pair them up: (open, close), (open, close), ...
         positions = []
         for i in range(0, len(occurrences) - 1, 2):
-            start = occurrences[i] + len(uci_move_tokens)  # After first uci_move
-            end = occurrences[i + 1]  # Before second uci_move
-            # Collect positions between (skip the > and </ tokens)
+            # Include full tags: from < before first uci_move to > after second uci_move
+            start = occurrences[i] - 1  # Include < before uci_move
+            end = occurrences[i + 1] + len(uci_move_tokens) + 1  # Include > after uci_move
             for pos in range(start, end):
-                positions.append(pos)
+                if 0 <= pos < len(input_ids):
+                    positions.append(pos)
 
         return positions
 
