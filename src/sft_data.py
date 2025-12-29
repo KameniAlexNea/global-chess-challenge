@@ -79,18 +79,14 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
     assistant_color = chess.WHITE if assistant_is_white else chess.BLACK
 
     assistant_color_name = "White" if assistant_is_white else "Black"
-    user_color_name = "Black" if assistant_is_white else "White"
 
     # Build conversation
     messages = []
     has_assistant_move = False
-    is_first_message = True
-    pending_user_content = None
+    pending_user_move = None
 
     for i, move_uci in enumerate(moves):
         current_turn = board.turn
-        legal_moves = [m.uci() for m in board.legal_moves]
-        current_fen = board.fen()
 
         try:
             move = chess.Move.from_uci(move_uci)
@@ -100,23 +96,23 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
             break
 
         if current_turn == assistant_color:
-            # Assistant's turn - create user message with position, then assistant response
-            if is_first_message:
+            # Assistant's turn - show position with legal moves, then assistant responds
+            current_fen = board.fen()
+            legal_moves = [m.uci() for m in board.legal_moves]
+            
+            if i == 0:
+                # Assistant moves first
                 user_content = f"""Let's play chess. You are {assistant_color_name}.
 
 Position: {current_fen}
 Legal moves: {' '.join(legal_moves)}"""
-                is_first_message = False
             else:
-                # User played, now show position for assistant
-                user_content = (
-                    pending_user_content
-                    + f"""
+                # User just played, now show the resulting position for assistant
+                user_content = f"""<uci_move>{pending_user_move}</uci_move>
 
 Position: {current_fen}
 Legal moves: {' '.join(legal_moves)}"""
-                )
-                pending_user_content = None
+                pending_user_move = None
 
             messages.append({"role": "user", "content": user_content})
             messages.append(
@@ -124,15 +120,8 @@ Legal moves: {' '.join(legal_moves)}"""
             )
             has_assistant_move = True
         else:
-            # User's turn - store the move, will be combined with next position
-            if is_first_message:
-                # User moves first, assistant will respond after
-                pending_user_content = f"""Let's play chess. You are {assistant_color_name}.
-
-<uci_move>{move_uci}</uci_move>"""
-                is_first_message = False
-            else:
-                pending_user_content = f"<uci_move>{move_uci}</uci_move>"
+            # User's turn - just store the move to show with next position
+            pending_user_move = move_uci
 
         board.push(move)
 
