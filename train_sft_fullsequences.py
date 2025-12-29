@@ -3,11 +3,11 @@ SFT training on move sequences from Stockfish evaluations.
 
 Training approach:
 - Load full lines (sequences of best moves)
-- Randomly pick split point in line
-- Create example: position after N moves → predict move N+1
-- Output format: <uci_move>e2e4</uci_move>
+- Create multi-turn conversations where assistant plays one color
+- Each turn includes FEN and legal moves for full context
+- Both user and assistant respond with <uci_move>xxxx</uci_move>
 
-This teaches move prediction without forced rationales.
+This teaches the model to play full games with proper context.
 """
 
 import os
@@ -26,7 +26,7 @@ from transformers import (
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import torch
-from src.sft_data import load_sft_single_move_dataset
+from src.sft_data import load_sft_sequences_dataset
 
 
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
@@ -38,12 +38,12 @@ if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
 # Load and preprocess dataset
-sft_train, sft_eval = load_sft_single_move_dataset(
+sft_train, sft_eval = load_sft_sequences_dataset(
     tokenizer=tokenizer,
     data_file="data/processed/move_sequences_500mb.jsonl",
     train_samples=1_000_000,
     test_size=0.01,
-    max_length=512,
+    max_length=1024,
     num_proc=16,
     seed=42,
 )
@@ -89,7 +89,7 @@ model.print_trainable_parameters()
 
 # Training config
 training_args = TrainingArguments(
-    output_dir="models/chess-sft-sequences",
+    output_dir="models/chess-sft-fullsequences",
     num_train_epochs=1,
     per_device_train_batch_size=16,  # Balanced for device_map auto
     gradient_accumulation_steps=4,
@@ -103,7 +103,7 @@ training_args = TrainingArguments(
     bf16=True,
     gradient_checkpointing=True,
     report_to="wandb",
-    run_name="chess-sft-sequences-v2",
+    run_name="chess-sft-fullsequences-v1",
     remove_unused_columns=False,
     dataloader_num_workers=16,
     dataloader_pin_memory=True,
