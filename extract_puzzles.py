@@ -9,12 +9,13 @@ dictionaries matching the competition format.
 import argparse
 import csv
 import json
-import zstandard as zstd
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
-from collections import Counter
+
 import chess
+import zstandard as zstd
 from tqdm import tqdm
 
 

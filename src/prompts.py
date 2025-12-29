@@ -1,8 +1,8 @@
 from src.config import (
-    rationale_tag,
+    close_move_tag,
     close_rationale_tag,
     move_tag,
-    close_move_tag,
+    rationale_tag,
 )
 
 system_msg = "You are a chess expert. Analyze positions carefully and find the best tactical move from legal moves."

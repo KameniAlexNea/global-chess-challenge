@@ -1,10 +1,11 @@
 import re
+
 from src.config import (
-    rationale_tag,
+    close_move_tag,
     close_rationale_tag,
     move_tag,
-    close_move_tag,
-    name_used
+    name_used,
+    rationale_tag,
 )
 
 

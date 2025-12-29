@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Quick test of the Stockfish-based reward function."""
 
-from src.rewards import stockfish_eval_reward_func, correctness_reward_func
-from src.config import rationale_tag, close_rationale_tag, move_tag, close_move_tag
+from src.config import (
+    close_move_tag,
+    close_rationale_tag,
+    move_tag,
+    rationale_tag,
+)
+from src.rewards import correctness_reward_func, stockfish_eval_reward_func
 
 # Test position: r6k/pp2r2p/4Rp1Q/3p4/8/1N1P2R1/PqP2bPP/7K b - - 0 24
 # Correct move: f2g3 (puzzle solution)
@@ -31,23 +36,22 @@ print(f"\nPosition: {fen}")
 print(f"Correct move: {correct_move}")
 print(f"Legal moves: {legal_moves}")
 
-binary_rewards = correctness_reward_func(
-    completions, 
-    correct_move=[correct_move] * 3
-)
+binary_rewards = correctness_reward_func(completions, correct_move=[correct_move] * 3)
 
 stockfish_rewards = stockfish_eval_reward_func(
     completions,
     correct_move=[correct_move] * 3,
     fen=[fen] * 3,
     legal_moves=[legal_moves] * 3,
-    depth=12
+    depth=12,
 )
 
 print("\n" + "=" * 80)
 print("Results:")
 print("=" * 80)
-for i, (comp, bin_rew, stock_rew) in enumerate(zip(completions, binary_rewards, stockfish_rewards)):
+for i, (comp, bin_rew, stock_rew) in enumerate(
+    zip(completions, binary_rewards, stockfish_rewards)
+):
     move = comp.split(move_tag)[1].split(close_move_tag)[0]
     print(f"\nMove {i+1}: {move}")
     print(f"  Binary Reward:     {bin_rew:+.2f}")

@@ -7,21 +7,25 @@ os.environ["WANDB_DISABLE_SERVICE"] = "true"
 
 import random
 
-from transformers import AutoTokenizer
-
 import torch
-from transformers import AutoModelForCausalLM
-from trl import GRPOConfig, GRPOTrainer
 from peft import LoraConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import GRPOConfig, GRPOTrainer
+
+from src.config import (
+    close_move_tag,
+    close_rationale_tag,
+    move_tag,
+    rationale_tag,
+)
 from src.data import load_chess_dataset
-from src.tokenizer_utils import ensure_chat_template
 from src.rewards import (
+    correctness_reward_func,
     format_reward_func,
     legality_reward_func,
-    correctness_reward_func,
     stockfish_eval_reward_func,
 )
-from src.config import rationale_tag, move_tag, close_rationale_tag, close_move_tag
+from src.tokenizer_utils import ensure_chat_template
 
 model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
 model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"

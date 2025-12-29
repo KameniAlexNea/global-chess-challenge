@@ -1,8 +1,10 @@
-import chess
-import chess.engine
 import os
 from functools import lru_cache
 from typing import Optional
+
+import chess
+import chess.engine
+
 from src.utils import extract_xml_answer
 
 # Constants

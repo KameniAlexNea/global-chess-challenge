@@ -2,11 +2,12 @@
 SFT data loading and preprocessing for chess move sequences.
 """
 
-import chess
 import random
-from typing import Dict, Optional, Literal
 from functools import lru_cache
-from datasets import load_dataset, Dataset
+from typing import Dict, Literal, Optional
+
+import chess
+from datasets import Dataset, load_dataset
 from transformers import PreTrainedTokenizer
 
 
@@ -78,12 +79,20 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
     assistant_is_white = random.choice([True, False])
     assistant_color = chess.WHITE if assistant_is_white else chess.BLACK
     assistant_color_name = "White" if assistant_is_white else "Black"
+    user_color_name = "Black" if assistant_is_white else "White"
+
+    # Add system message explaining the game
+    system_message = f"""You are playing chess as {assistant_color_name}. The user is {user_color_name}.
+
+Starting position (FEN): {fen}
+
+Moves are in UCI notation inside <uci_move></uci_move> tags. Each move alternates the board state.
+You will receive the current position and legal moves, then respond with your move in the same format."""
 
     # Build conversation
-    messages = []
+    messages = [{"role": "system", "content": system_message}]
     has_assistant_move = False
     last_user_move = None
-    is_first_turn = True
 
     for move_uci in moves:
         current_turn = board.turn
@@ -99,34 +108,23 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
             # Assistant's turn - show position + legal moves, assistant responds
             current_fen = board.fen()
             legal_moves = [m.uci() for m in board.legal_moves]
-            
-            if is_first_turn:
-                # Very first message of the game
-                if last_user_move is None:
-                    # Assistant moves first
-                    user_content = f"""Let's play chess. You are {assistant_color_name}.
 
-Position: {current_fen}
+            if last_user_move is None:
+                # Assistant moves first
+                user_content = f"""Position: {current_fen}
 Legal moves: {' '.join(legal_moves)}"""
-                else:
-                    # User moved first
-                    user_content = f"""Let's play chess. You are {assistant_color_name}.
-
-<uci_move>{last_user_move}</uci_move>
-
-Position: {current_fen}
-Legal moves: {' '.join(legal_moves)}"""
-                is_first_turn = False
             else:
-                # Subsequent assistant turns
+                # User moved, show their move then position
                 user_content = f"""<uci_move>{last_user_move}</uci_move>
 
 Position: {current_fen}
 Legal moves: {' '.join(legal_moves)}"""
-            
+
             last_user_move = None
             messages.append({"role": "user", "content": user_content})
-            messages.append({"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"})
+            messages.append(
+                {"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"}
+            )
             has_assistant_move = True
         else:
             # User's turn - store move to show later
@@ -156,15 +154,15 @@ def load_sft_text_examples(
 ):
     """
     Load chess move sequences and return formatted text examples (no tokenization).
-    
+
     This allows inspection of the training data before tokenization.
-    
+
     Args:
         data_file: Path to the JSONL file with move sequences
         num_samples: Number of samples to load
         mode: "single_move" for single Q&A or "conversation" for multi-turn
         seed: Random seed for sampling
-        
+
     Returns:
         Dataset with formatted text examples
     """
@@ -172,32 +170,34 @@ def load_sft_text_examples(
     print(f"Loading {num_samples} examples from {data_file}...")
     dataset = load_dataset("json", data_files=data_file)
     full_dataset = dataset["train"]
-    
+
     # Sample
     if len(full_dataset) > num_samples:
         full_dataset = full_dataset.shuffle(seed=seed).select(range(num_samples))
-    
+
     examples = []
-    
+
     for item in full_dataset:
         line_data = {
             "fen": item["fen"],
             "line": item["line"],
             "depth": item["depth"],
         }
-        
+
         if mode == "single_move":
             # Create single move example
             result = create_single_move_example(line_data)
-            examples.append({
-                "type": "single_move",
-                "prompt": result["prompt"],
-                "response": result["response"],
-                "fen": line_data["fen"],
-                "line": line_data["line"],
-                "depth": line_data["depth"],
-            })
-        
+            examples.append(
+                {
+                    "type": "single_move",
+                    "prompt": result["prompt"],
+                    "response": result["response"],
+                    "fen": line_data["fen"],
+                    "line": line_data["line"],
+                    "depth": line_data["depth"],
+                }
+            )
+
         elif mode == "conversation":
             # Create conversation example
             result = create_conversation_example(line_data)
@@ -206,22 +206,26 @@ def load_sft_text_examples(
                 messages_text = []
                 for msg in result["messages"]:
                     messages_text.append(f"{msg['role']}: {msg['content']}")
-                
-                examples.append({
-                    "type": "conversation",
-                    "messages": result["messages"],
-                    "messages_text": "\n\n".join(messages_text),
-                    "num_moves": result["num_moves"],
-                    "fen": line_data["fen"],
-                    "line": line_data["line"],
-                    "depth": line_data["depth"],
-                })
-        
+
+                examples.append(
+                    {
+                        "type": "conversation",
+                        "messages": result["messages"],
+                        "messages_text": "\n\n".join(messages_text),
+                        "num_moves": result["num_moves"],
+                        "fen": line_data["fen"],
+                        "line": line_data["line"],
+                        "depth": line_data["depth"],
+                    }
+                )
+
         else:
-            raise ValueError(f"Invalid mode: {mode}. Must be 'single_move' or 'conversation'")
-    
+            raise ValueError(
+                f"Invalid mode: {mode}. Must be 'single_move' or 'conversation'"
+            )
+
     print(f"Loaded {len(examples)} valid examples")
-    
+
     # Convert to Dataset
     return Dataset.from_list(examples)
 

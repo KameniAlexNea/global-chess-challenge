@@ -1,7 +1,9 @@
-from datasets import load_dataset
 import json
-from src.prompts import user_msg
+
+from datasets import load_dataset
 from transformers import Qwen2TokenizerFast
+
+from src.prompts import user_msg
 
 
 def load_chess_dataset(
@@ -77,6 +79,8 @@ def load_chess_dataset(
         desc="Formatting eval set",
     )
 
-    print(f"Preprocessed {len(train_dataset):,} train | {len(eval_dataset):,} eval examples")
+    print(
+        f"Preprocessed {len(train_dataset):,} train | {len(eval_dataset):,} eval examples"
+    )
 
     return train_dataset, eval_dataset
