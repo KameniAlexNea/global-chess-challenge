@@ -31,6 +31,7 @@ model_name = "unsloth/granite-4.0-h-1b-base-unsloth-bnb-4bit"
 model_name = "unsloth/gemma-3-1b-it-unsloth-bnb-4bit"
 model_name = "unsloth/Qwen2.5-Math-1.5B-Instruct"
 model_name = "models/chess-sft-warmup-merged"
+model_name = "models/chess-grpo-sft-conv-merged"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
 tokenizer = ensure_chat_template(tokenizer)
@@ -71,14 +72,14 @@ training_args = GRPOConfig(
     lr_scheduler_type="cosine",
     logging_steps=20,
     max_steps=3000,
-    per_device_train_batch_size=4,  # Smaller batch for more diverse samples
+    per_device_train_batch_size=8,  # Smaller batch for more diverse samples
     gradient_accumulation_steps=4,  # Keep same effective batch
-    gradient_checkpointing=True,
+    gradient_checkpointing=False,
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
     # GRPO specific
     max_completion_length=128,  # Reduced - need ~50 tokens max for answer
-    num_generations=16,
+    num_generations=8,
     beta=0.01,  # Higher KL penalty to stay close to base model
     top_k=50,  # More diverse sampling
     top_p=0.95,
@@ -88,7 +89,7 @@ training_args = GRPOConfig(
     logging_dir="./logs",
     save_steps=300,
     eval_steps=600,
-    run_name="chess-grpo-qwen3-challenge",
+    run_name="chess-grpo-qwen3-sftfast-challenge",
 )
 
 print("Config ready!")

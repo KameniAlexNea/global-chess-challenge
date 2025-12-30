@@ -5,7 +5,7 @@ from typing import Optional
 import chess
 import chess.engine
 
-from src.utils import extract_xml_answer
+from src.utils import extract_xml_answer, extract_rationale, extract_move
 
 # Constants
 MATE_THRESHOLD = 9000  # Centipawn threshold for mate detection (~90 pawns)
@@ -71,15 +71,72 @@ def format_reward_func(completions, **kwargs):
     return rewards
 
 
+def rationale_format_reward_func(completions, **kwargs):
+    """
+    Reward for having rationale tags, independent of move tags.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            rationale = extract_rationale(completion)
+            rewards.append(1.0 if rationale is not None else 0.0)
+        except:
+            rewards.append(0.0)
+    return rewards
+
+
+def move_format_reward_func(completions, **kwargs):
+    """
+    Reward for having move tags, independent of rationale tags.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            move = extract_move(completion)
+            rewards.append(1.0 if move is not None else 0.0)
+        except:
+            rewards.append(0.0)
+    return rewards
+
+
+def rationale_length_reward_func(completions, **kwargs):
+    """
+    Reward for concise rationale (one sentence, < 150 chars).
+    Encourages brief, focused explanations.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            rationale = extract_rationale(completion)
+            if rationale is None:
+                rewards.append(-0.5)
+                continue
+
+            # Count sentences (rough heuristic)
+            sentence_count = len([s for s in rationale.split(".") if s.strip()])
+            length = len(rationale)
+
+            if sentence_count == 1 and length < 150:
+                rewards.append(1.0)
+            elif sentence_count <= 2 and length < 200:
+                rewards.append(0.5)
+            else:
+                rewards.append(-0.5)  # Penalty for verbose rationales
+        except:
+            rewards.append(-0.5)
+    return rewards
+
+
 def legality_reward_func(completions, legal_moves, **kwargs):
     """
     Reward if the move is legal. Heavy penalty for illegal moves.
     This is a hard constraint - model must learn chess rules first.
+    Uses independent move extraction.
     """
     rewards = []
     for completion, legal in zip(completions, legal_moves):
         try:
-            _, move, _ = extract_xml_answer(completion)
+            move = extract_move(completion)
             if move is None:
                 rewards.append(-1.0)  # Failed to extract any move
                 continue
@@ -96,12 +153,12 @@ def legality_reward_func(completions, legal_moves, **kwargs):
 def correctness_reward_func(completions, correct_move, **kwargs):
     """
     Reward if the move is correct (matches puzzle solution).
-    Disentangled from format - we try to extract move even if XML is wrong.
+    Uses independent move extraction.
     """
     rewards = []
     for completion, correct in zip(completions, correct_move):
         try:
-            _, move, _ = extract_xml_answer(completion)
+            move = extract_move(completion)
             if move is None:
                 rewards.append(-0.5)
                 continue
@@ -122,6 +179,7 @@ def stockfish_eval_reward_func(
     Continuous reward based on Stockfish evaluation.
     Compares move quality using centipawn evaluation from current position.
     Uses LRU caching for ~2x speedup on repeated positions.
+    Uses independent move extraction.
     """
     rewards = []
 
@@ -129,7 +187,7 @@ def stockfish_eval_reward_func(
         completions, correct_move, fen, legal_moves
     ):
         try:
-            _, move, _ = extract_xml_answer(completion)
+            move = extract_move(completion)
 
             if move is None:
                 rewards.append(-3.0)  # Failed to extract

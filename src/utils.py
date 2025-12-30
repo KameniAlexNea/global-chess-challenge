@@ -9,6 +9,30 @@ from src.config import (
 )
 
 
+def extract_rationale(text):
+    """
+    Extract rationale independently from text.
+    Returns: rationale text or None
+    """
+    pattern = rf"{rationale_tag}\s*(.+?)\s*{close_rationale_tag}"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def extract_move(text):
+    """
+    Extract UCI move independently from text.
+    Returns: move string or None
+    """
+    pattern = rf"{move_tag}\s*(.+?)\s*{close_move_tag}"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def extract_xml_answer(text):
     """
     XML extraction - NO participation trophies.
