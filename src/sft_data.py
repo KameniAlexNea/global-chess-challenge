@@ -462,15 +462,6 @@ def load_sft_sequences_dataset(
         desc="Formatting eval set",
     )
 
-    # Filter out invalid examples
-    print("Filtering invalid examples...")
-    sft_train = sft_train.filter(
-        lambda x: sum(x["attention_mask"]) > 10, num_proc=num_proc
-    )
-    sft_eval = sft_eval.filter(
-        lambda x: sum(x["attention_mask"]) > 10, num_proc=num_proc
-    )
-
     # Set format for PyTorch
     sft_train.set_format(
         type="torch", columns=["input_ids", "attention_mask", "labels"]
