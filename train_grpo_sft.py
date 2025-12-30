@@ -13,9 +13,8 @@ os.environ["WANDB_DISABLE_SERVICE"] = "true"
 import random
 
 import torch
-from transformers import GenerationConfig
 from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import GRPOConfig, GRPOTrainer
 
 from src.config import (
@@ -87,6 +86,14 @@ print(
 )
 print()
 
+# 4-bit quantization config for faster loading and less memory
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16,
+)
+
 # GRPO Training config
 training_args = GRPOConfig(
     output_dir="models/chess-grpo-sequences",
@@ -94,11 +101,17 @@ training_args = GRPOConfig(
     lr_scheduler_type="cosine",
     logging_steps=20,
     max_steps=5000,
-    per_device_train_batch_size=8,
-    gradient_accumulation_steps=4,
-    gradient_checkpointing=False,
+    per_device_train_batch_size=4,  # Reduced for faster iterations
+    gradient_accumulation_steps=8,  # Maintain effective batch size
+    gradient_checkpointing=False,  # Disabled for speed
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
+    # Model loading
+    model_init_kwargs={
+        "quantization_config": bnb_config,
+        # "device_map": {"": 0},  # Force single GPU
+        "dtype": torch.bfloat16,
+    },
     # GRPO specific
     max_completion_length=128,  # Room for rationale + move
     num_generations=8,  # Sample multiple completions
