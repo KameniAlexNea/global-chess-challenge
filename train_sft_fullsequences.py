@@ -16,6 +16,7 @@ os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
 os.environ["WANDB_DISABLE_CODE"] = "true"
 os.environ["WANDB_DISABLE_SERVICE"] = "true"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # Use only GPU 1
 
 import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -42,7 +43,7 @@ if tokenizer.pad_token is None:
 sft_train, sft_eval = load_sft_sequences_dataset(
     tokenizer=tokenizer,
     data_file="data/processed/move_sequences_500mb.jsonl",
-    train_samples=1_000_000,
+    train_samples=250_000,
     test_size=0.01,
     max_length=1024,
     num_proc=16,
@@ -61,7 +62,7 @@ bnb_config = BitsAndBytesConfig(
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     quantization_config=bnb_config,
-    device_map="auto",  # Required for 4-bit to work properly
+    device_map={"": 0},  # All on single GPU (GPU 1, but appears as 0 after CUDA_VISIBLE_DEVICES)
 )
 
 # Prepare for k-bit training
@@ -92,22 +93,23 @@ model.print_trainable_parameters()
 training_args = TrainingArguments(
     output_dir="models/chess-sft-fullsequences",
     num_train_epochs=1,
-    per_device_train_batch_size=16,  # Balanced for device_map auto
-    gradient_accumulation_steps=4,
+    per_device_train_batch_size=16,  # Increase batch size
+    gradient_accumulation_steps=4,  # Reduce accumulation (same effective batch)
     learning_rate=2e-4,
     lr_scheduler_type="cosine",
     warmup_steps=500,
     logging_steps=50,
-    save_steps=2000,
+    save_steps=1000,
     eval_steps=1000,
     eval_strategy="steps",
     bf16=True,
     gradient_checkpointing=True,
     report_to="wandb",
-    run_name="chess-sft-fullsequences-v1",
+    run_name="chess-sft-fullsequences-v2",
     remove_unused_columns=False,
-    dataloader_num_workers=16,
+    dataloader_num_workers=4,  # Reduce workers (less overhead)
     dataloader_pin_memory=True,
+    dataloader_prefetch_factor=2,  # Prefetch fewer batches
 )
 
 # Create trainer
