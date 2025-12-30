@@ -244,7 +244,7 @@ def load_sft_single_move_dataset(
 
     Each training example: given a position, predict the next best move.
     Uses random splits so same line generates different examples.
-    Only trains on tokens between <uci_move> and </uci_move> tags.
+    Only trains on tokens between <uci_move> and </uci_move> tags in the response.
 
     Args:
         tokenizer: The tokenizer to use
@@ -270,22 +270,26 @@ def load_sft_single_move_dataset(
                 positions.append(i)
         return positions
 
-    def find_move_token_positions(input_ids: list) -> list:
-        """Find positions of move tokens (full <uci_move>...</uci_move> tags)."""
+    def find_move_token_positions(input_ids: list, start_pos: int = 0) -> list:
+        """Find positions of move tokens (ONLY the LAST <uci_move>...</uci_move> tags)."""
         # Find all occurrences of "uci_move" tokens
         occurrences = find_subsequence(input_ids, uci_move_tokens)
+        
+        if len(occurrences) < 2:
+            return []
 
-        # Pair them up: (open, close), (open, close), ...
+        # Take only the LAST pair (response), ignore any in the prompt
+        last_open = occurrences[-2]
+        last_close = occurrences[-1]
+        
+        # Include full tags: from < before first uci_move to > after second uci_move
+        start = last_open - 1  # Include < before uci_move
+        end = last_close + len(uci_move_tokens) + 1  # Include > after uci_move
+        
         positions = []
-        for i in range(0, len(occurrences) - 1, 2):
-            # Include full tags: from < before first uci_move to > after second uci_move
-            start = occurrences[i] - 1  # Include < before uci_move
-            end = (
-                occurrences[i + 1] + len(uci_move_tokens) + 1
-            )  # Include > after uci_move
-            for pos in range(start, end):
-                if 0 <= pos < len(input_ids):
-                    positions.append(pos)
+        for pos in range(start, end):
+            if 0 <= pos < len(input_ids):
+                positions.append(pos)
 
         return positions
 
@@ -306,10 +310,17 @@ def load_sft_single_move_dataset(
             messages, tokenize=False, add_generation_prompt=True
         )
 
+        # Tokenize prompt separately to know where it ends
+        prompt_tokens = tokenizer(
+            prompt,
+            add_special_tokens=False,
+        )
+        prompt_length = len(prompt_tokens["input_ids"])
+
         # Full text
         full_text = prompt + training_example["response"] + tokenizer.eos_token
 
-        # Tokenize
+        # Tokenize full text
         model_inputs = tokenizer(
             full_text,
             max_length=max_length,
@@ -319,8 +330,10 @@ def load_sft_single_move_dataset(
 
         input_ids = model_inputs["input_ids"]
 
-        # Create labels - only predict move tokens
+        # Create labels - only train on move tokens in the response part
         labels = [-100] * len(input_ids)
+        
+        # Find only the LAST <uci_move> tags (the response, not the prompt)
         move_positions = find_move_token_positions(input_ids)
         for pos in move_positions:
             labels[pos] = input_ids[pos]

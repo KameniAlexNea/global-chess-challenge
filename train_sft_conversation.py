@@ -32,7 +32,7 @@ sft_train, sft_eval = load_sft_sequences_dataset(
     data_file="data/processed/move_sequences_500mb.jsonl",
     train_samples=500_000,
     test_size=0.01,
-    max_length=512,  # Reduced from 1024 for speed
+    max_length=2048,  # Reduced from 1024 for speed
     num_proc=16,
     seed=42,
 )
@@ -78,8 +78,8 @@ model.print_trainable_parameters()
 training_args = TrainingArguments(
     output_dir="models/chess-sft-conversation",
     num_train_epochs=1,
-    per_device_train_batch_size=24,  # Larger batch
-    gradient_accumulation_steps=4,  # No accumulation
+    per_device_train_batch_size=4,  # Larger batch
+    gradient_accumulation_steps=16,  # No accumulation
     learning_rate=2e-4,
     lr_scheduler_type="cosine",
     warmup_steps=500,
