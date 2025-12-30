@@ -379,7 +379,9 @@ def load_sft_sequences_dataset(
         for i in range(0, len(occurrences) - 1, 2):
             # Include full tags: from < before first uci_move to > after second uci_move
             start = occurrences[i] - 1  # Include < before uci_move
-            end = occurrences[i + 1] + len(uci_move_tokens) + 1  # Include > after uci_move
+            end = (
+                occurrences[i + 1] + len(uci_move_tokens) + 1
+            )  # Include > after uci_move
             for pos in range(start, end):
                 if 0 <= pos < len(input_ids):
                     positions.append(pos)
