@@ -78,8 +78,8 @@ model.print_trainable_parameters()
 training_args = TrainingArguments(
     output_dir="models/chess-sft-single",
     num_train_epochs=1,
-    per_device_train_batch_size=32,  # Larger batch
-    gradient_accumulation_steps=1,  # No accumulation
+    per_device_train_batch_size=24,  # Larger batch
+    gradient_accumulation_steps=4,  # No accumulation
     learning_rate=2e-4,
     lr_scheduler_type="cosine",
     warmup_steps=500,
