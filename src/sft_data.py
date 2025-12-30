@@ -244,6 +244,7 @@ def load_sft_single_move_dataset(
 
     Each training example: given a position, predict the next best move.
     Uses random splits so same line generates different examples.
+    Only trains on tokens between <uci_move> and </uci_move> tags.
 
     Args:
         tokenizer: The tokenizer to use
@@ -258,8 +259,38 @@ def load_sft_single_move_dataset(
         Tuple of (train_dataset, eval_dataset) ready for training
     """
 
+    # Get token IDs for "uci_move" - appears in both <uci_move> and </uci_move>
+    uci_move_tokens = tokenizer.encode("uci_move", add_special_tokens=False)
+
+    def find_subsequence(seq, subseq):
+        """Find all starting positions of subseq in seq."""
+        positions = []
+        for i in range(len(seq) - len(subseq) + 1):
+            if seq[i : i + len(subseq)] == subseq:
+                positions.append(i)
+        return positions
+
+    def find_move_token_positions(input_ids: list) -> list:
+        """Find positions of move tokens (full <uci_move>...</uci_move> tags)."""
+        # Find all occurrences of "uci_move" tokens
+        occurrences = find_subsequence(input_ids, uci_move_tokens)
+
+        # Pair them up: (open, close), (open, close), ...
+        positions = []
+        for i in range(0, len(occurrences) - 1, 2):
+            # Include full tags: from < before first uci_move to > after second uci_move
+            start = occurrences[i] - 1  # Include < before uci_move
+            end = (
+                occurrences[i + 1] + len(uci_move_tokens) + 1
+            )  # Include > after uci_move
+            for pos in range(start, end):
+                if 0 <= pos < len(input_ids):
+                    positions.append(pos)
+
+        return positions
+
     def format_for_sft(example):
-        """Format a single example for supervised learning."""
+        """Format a single example for supervised learning with label masking."""
         line_data = {
             "fen": example["fen"],
             "line": example["line"],
@@ -286,8 +317,15 @@ def load_sft_single_move_dataset(
             padding="max_length",
         )
 
-        # Set labels
-        model_inputs["labels"] = model_inputs["input_ids"].copy()
+        input_ids = model_inputs["input_ids"]
+
+        # Create labels - only predict move tokens
+        labels = [-100] * len(input_ids)
+        move_positions = find_move_token_positions(input_ids)
+        for pos in move_positions:
+            labels[pos] = input_ids[pos]
+
+        model_inputs["labels"] = labels
 
         return model_inputs
 

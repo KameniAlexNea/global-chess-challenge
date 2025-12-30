@@ -6,7 +6,7 @@ import os
 
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -20,7 +20,7 @@ from transformers import (
 
 from src.sft_data import load_sft_sequences_dataset
 
-model_name = "models/chess-grpo-sft-merged"
+model_name = "unsloth/gemma-3-270m-it-unsloth-bnb-4bit"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
 if tokenizer.pad_token is None:
@@ -30,7 +30,7 @@ if tokenizer.pad_token is None:
 sft_train, sft_eval = load_sft_sequences_dataset(
     tokenizer=tokenizer,
     data_file="data/processed/move_sequences_500mb.jsonl",
-    train_samples=250_000,
+    train_samples=500_000,
     test_size=0.01,
     max_length=512,  # Reduced from 1024 for speed
     num_proc=16,
@@ -76,9 +76,9 @@ model.print_trainable_parameters()
 
 # Training config - NO GRADIENT CHECKPOINTING
 training_args = TrainingArguments(
-    output_dir="models/chess-sft-fullsequences-fast",
+    output_dir="models/chess-sft-conversation",
     num_train_epochs=1,
-    per_device_train_batch_size=16,  # Larger batch
+    per_device_train_batch_size=32,  # Larger batch
     gradient_accumulation_steps=1,  # No accumulation
     learning_rate=2e-4,
     lr_scheduler_type="cosine",
@@ -90,7 +90,7 @@ training_args = TrainingArguments(
     bf16=True,
     gradient_checkpointing=False,  # DISABLED - much faster
     report_to="wandb",
-    run_name="chess-sft-fullsequences-fast",
+    run_name="chess-sft-conversation",
     remove_unused_columns=False,
     dataloader_num_workers=4,
     dataloader_pin_memory=True,
