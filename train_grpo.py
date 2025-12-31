@@ -7,7 +7,7 @@ import os
 
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import random
 
@@ -98,8 +98,8 @@ bnb_config = BitsAndBytesConfig(
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    quantization_config=bnb_config,
-    device_map={"": 0},
+    # quantization_config=bnb_config,
+    device_map="auto",
 )
 
 model = prepare_model_for_kbit_training(
@@ -116,7 +116,7 @@ training_args = GRPOConfig(
     logging_steps=20,
     max_steps=5000,
     per_device_train_batch_size=4,  # Reduced for faster iterations
-    gradient_accumulation_steps=8,  # Maintain effective batch size
+    gradient_accumulation_steps=4,  # Maintain effective batch size
     gradient_checkpointing=False,  # Disabled for speed
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
@@ -128,9 +128,10 @@ training_args = GRPOConfig(
     top_p=0.9,
     temperature=1.0,
     generation_kwargs={
+        "max_length": 1024,
         "max_new_tokens": 128,
         "max_time": 30,
-        "length_penalty": -1.0,
+        "length_penalty": 0.5,
     },
     # Logging
     report_to="wandb",
