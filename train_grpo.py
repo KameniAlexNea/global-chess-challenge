@@ -8,10 +8,12 @@ import os
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import random
 
 import torch
+from functools import wraps
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import GRPOConfig, GRPOTrainer
@@ -50,10 +52,25 @@ def _get_device_map_for_kbit_training() -> dict[str, int] | None:
     return {"": local_rank}
 
 
+def _scale_reward_func(reward_func, weight: float, name: str | None = None):
+    base_name = name or getattr(reward_func, "__name__", "reward")
+
+    @wraps(reward_func)
+    def scaled(*args, **kwargs):
+        rewards = reward_func(*args, **kwargs)
+        return [float(r) * weight for r in rewards]
+
+    # TRL logs metrics using the reward function name; make it explicit.
+    scaled.__name__ = f"{base_name}_x{weight:g}"
+    scaled.__qualname__ = scaled.__name__
+    return scaled
+
+NAME = "unsloth/Qwen2.5-Coder-0.5B-Instruct-bnb-4bit"
+
 def main() -> None:
     # Model selection
-    model_name = "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit"  # Start from SFT checkpoint
-    tokenizer_name = "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit"
+    model_name = NAME  # Start from SFT checkpoint
+    tokenizer_name = NAME
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, fix_mistral_regex=True)
     tokenizer = ensure_chat_template(tokenizer)
@@ -96,8 +113,8 @@ def main() -> None:
         learning_rate=5e-6,  # Lower LR for stability
         lr_scheduler_type="cosine",
         logging_steps=20,
-        max_steps=10000,
-        per_device_train_batch_size=4,  # Reduced for faster iterations
+        max_steps=2500,
+        per_device_train_batch_size=24,  # Reduced for faster iterations
         gradient_accumulation_steps=2,  # Maintain effective batch size
         bf16=True,
         gradient_checkpointing=False,
@@ -117,9 +134,11 @@ def main() -> None:
         # Logging
         report_to="wandb",
         logging_dir="./logs",
-        save_steps=1000,
+        save_steps=500,
         eval_steps=1000,
         run_name="chess-grpo-sequences-v1",
+        # auto_find_batch_size=True,
+        ddp_find_unused_parameters=False,
     )
 
     print("\nTraining configuration:")
@@ -165,15 +184,23 @@ def main() -> None:
     def stockfish_var_eval_reward_func(completions, **kwargs):
         return stockfish_eval_reward_func(completions, depth=current_depth, **kwargs)
 
+    # Reward weights: make Stockfish the dominant signal while keeping
+    # format/legality constraints as shaping rewards.
+    stockfish_reward = _scale_reward_func(stockfish_var_eval_reward_func, 3.0, name="stockfish_eval")
+    combined_format_reward = _scale_reward_func(combined_format_reward_func, 0.5, name="combined_format")
+    token_penalty_reward = _scale_reward_func(token_penalty_reward_func, 1.0, name="token_penalty")
+    rationale_length_reward = _scale_reward_func(rationale_length_reward_func, 0.5, name="rationale_length")
+    legality_reward = _scale_reward_func(legality_reward_func, 0.5, name="legality")
+
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
         reward_funcs=[
-            combined_format_reward_func,  # Replaces separate format rewards
-            token_penalty_reward_func,  # New: per-token penalty
-            rationale_length_reward_func,
-            legality_reward_func,
-            stockfish_var_eval_reward_func,
+            combined_format_reward,
+            token_penalty_reward,
+            rationale_length_reward,
+            legality_reward,
+            stockfish_reward,
         ],
         args=training_args,
         train_dataset=train_dataset,
