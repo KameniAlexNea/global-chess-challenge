@@ -7,7 +7,7 @@ import os
 
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import random
 
@@ -89,12 +89,12 @@ print()
 
 # Load model
 print("Loading model...")
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
-)
+# bnb_config = BitsAndBytesConfig(
+#     load_in_4bit=True,
+#     bnb_4bit_use_double_quant=True,
+#     bnb_4bit_quant_type="nf4",
+#     bnb_4bit_compute_dtype=torch.bfloat16,
+# )
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
@@ -116,22 +116,22 @@ training_args = GRPOConfig(
     logging_steps=20,
     max_steps=5000,
     per_device_train_batch_size=4,  # Reduced for faster iterations
-    gradient_accumulation_steps=4,  # Maintain effective batch size
+    gradient_accumulation_steps=8,  # Maintain effective batch size
     gradient_checkpointing=False,  # Disabled for speed
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
     # GRPO specific
-    max_completion_length=128,  # Room for rationale + move
-    num_generations=8,  # Sample multiple completions
+    max_completion_length=256,  # Shorter for speed (rationale + move)
+    num_generations=4,  # Reduced from 8 for 2x speed boost
     beta=0.01,  # KL penalty
     top_k=30,
     top_p=0.9,
     temperature=1.0,
     generation_kwargs={
         "max_length": 1024,
-        "max_new_tokens": 128,
-        "max_time": 30,
-        "length_penalty": 0.5,
+        "max_new_tokens": 256,  # Match max_completion_length
+        "max_time": 15,  # Reduced timeout
+        # "length_penalty": 0.5,
     },
     # Logging
     report_to="wandb",

@@ -36,12 +36,22 @@ def get_model_template(tokenizer, model_config=None):
     # Qwen/ChatML format: <|im_start|> and <|im_end|>
     if "<|im_start|>" in special_tokens or model_type == "qwen":
         return (
-            "{% for message in messages %}"
-            "<|im_start|>{{ message['role'] }}\n{{ message['content'] }}<|im_end|>\n"
-            "{% endfor %}"
-            "{% if add_generation_prompt %}"
-            "<|im_start|>assistant\n"
-            "{% endif %}"
+            "{%- set default_system = 'You are a chess expert playing a game. Analyze positions carefully and respond with both a rationale explaining your reasoning and your move in UCI notation using <rationale></rationale> and <uci_move></uci_move> tags.' %}"
+            "{%- if messages[0]['role'] == 'system' %}"
+            "{{- '<|im_start|>system\\n' + messages[0]['content'] + '<|im_end|>\\n' }}"
+            "{%- else %}"
+            "{{- '<|im_start|>system\\n' + default_system + '<|im_end|>\\n' }}"
+            "{%- endif %}"
+            "{%- for message in messages %}"
+            "{%- if (message['role'] == 'user') or (message['role'] == 'system' and not loop.first) %}"
+            "{{- '<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n' }}"
+            "{%- elif message['role'] == 'assistant' %}"
+            "{{- '<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>\\n' }}"
+            "{%- endif %}"
+            "{%- endfor %}"
+            "{%- if add_generation_prompt %}"
+            "{{- '<|im_start|>assistant\\n' }}"
+            "{%- endif %}"
         )
 
     # Llama 3 format: <|begin_of_text|><|start_header_id|>
@@ -113,7 +123,7 @@ def ensure_chat_template(tokenizer, model_config=None):
     Returns:
         tokenizer: The tokenizer with chat_template set
     """
-    if tokenizer.chat_template is None:
+    if True: # Always resetting the chat_template : tokenizer.chat_template is None
         template = get_model_template(tokenizer, model_config)
         tokenizer.chat_template = template
 
