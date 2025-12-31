@@ -213,3 +213,4 @@ logs/
 models/
 *.out
 wandb
+global-chess-challenge.code-workspace

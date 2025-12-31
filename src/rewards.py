@@ -1,9 +1,11 @@
-import chess
-import chess.engine
 import os
 from functools import lru_cache
 from typing import Optional
-from src.utils import extract_xml_answer
+
+import chess
+import chess.engine
+
+from src.utils import extract_xml_answer, extract_rationale, extract_move
 
 # Constants
 MATE_THRESHOLD = 9000  # Centipawn threshold for mate detection (~90 pawns)
@@ -69,15 +71,105 @@ def format_reward_func(completions, **kwargs):
     return rewards
 
 
+def combined_format_reward_func(completions, **kwargs):
+    """
+    Combined reward for both rationale and move tags.
+    Reduces variance from correlated rewards.
+    +2.0 if both present, -1.0 otherwise.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            rationale = extract_rationale(completion)
+            move = extract_move(completion)
+            if rationale is not None and move is not None:
+                rewards.append(2.0)
+            else:
+                rewards.append(-1.0)
+        except:
+            rewards.append(-1.0)
+    return rewards
+
+
+def rationale_format_reward_func(completions, **kwargs):
+    """
+    Reward for having rationale tags, independent of move tags.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            rationale = extract_rationale(completion)
+            rewards.append(1.0 if rationale is not None else 0.0)
+        except:
+            rewards.append(0.0)
+    return rewards
+
+
+def move_format_reward_func(completions, **kwargs):
+    """
+    Reward for having move tags, independent of rationale tags.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            move = extract_move(completion)
+            rewards.append(1.0 if move is not None else 0.0)
+        except:
+            rewards.append(0.0)
+    return rewards
+
+
+def token_penalty_reward_func(completions, **kwargs):
+    """
+    Linear penalty per token to discourage verbosity.
+    Forces model to minimize tokens used.
+    """
+    rewards = []
+    for completion in completions:
+        token_count = len(completion.split())
+        rewards.append(-0.002 * token_count)  # Small penalty per token
+    return rewards
+
+
+def rationale_length_reward_func(completions, **kwargs):
+    """
+    Reward for concise rationale (one sentence, < 150 chars).
+    Encourages brief, focused explanations.
+    Note: Use with token_penalty_reward_func for best results.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            rationale = extract_rationale(completion)
+            if rationale is None:
+                rewards.append(-0.5)
+                continue
+
+            # Count sentences (rough heuristic)
+            sentence_count = len([s for s in rationale.split(".") if s.strip()])
+            length = len(rationale)
+
+            if sentence_count == 1 and length < 150:
+                rewards.append(1.0)
+            elif sentence_count <= 2 and length < 200:
+                rewards.append(0.5)
+            else:
+                rewards.append(-0.5)  # Penalty for verbose rationales
+        except:
+            rewards.append(-0.5)
+    return rewards
+
+
 def legality_reward_func(completions, legal_moves, **kwargs):
     """
     Reward if the move is legal. Heavy penalty for illegal moves.
     This is a hard constraint - model must learn chess rules first.
+    Uses independent move extraction.
     """
     rewards = []
     for completion, legal in zip(completions, legal_moves):
         try:
-            _, move, _ = extract_xml_answer(completion)
+            move = extract_move(completion)
             if move is None:
                 rewards.append(-1.0)  # Failed to extract any move
                 continue
@@ -94,12 +186,12 @@ def legality_reward_func(completions, legal_moves, **kwargs):
 def correctness_reward_func(completions, correct_move, **kwargs):
     """
     Reward if the move is correct (matches puzzle solution).
-    Disentangled from format - we try to extract move even if XML is wrong.
+    Uses independent move extraction.
     """
     rewards = []
     for completion, correct in zip(completions, correct_move):
         try:
-            _, move, _ = extract_xml_answer(completion)
+            move = extract_move(completion)
             if move is None:
                 rewards.append(-0.5)
                 continue
@@ -120,22 +212,29 @@ def stockfish_eval_reward_func(
     Continuous reward based on Stockfish evaluation.
     Compares move quality using centipawn evaluation from current position.
     Uses LRU caching for ~2x speedup on repeated positions.
+    Short-circuits early for invalid/illegal moves to avoid expensive Stockfish calls.
+    
+    Args:
+        depth: Stockfish search depth. Use 1 early in training, 3+ later.
     """
     rewards = []
 
     for completion, correct, position_fen, legal in zip(
         completions, correct_move, fen, legal_moves
     ):
+        # Short-circuit: extract move first (cheap)
+        move = extract_move(completion)
+        
+        if move is None:
+            rewards.append(-3.0)  # Failed to extract - no Stockfish call needed
+            continue
+
+        if move not in legal:
+            rewards.append(-4.0)  # Illegal move - no Stockfish call needed
+            continue
+        
+        # Only call Stockfish for valid moves
         try:
-            _, move, _ = extract_xml_answer(completion)
-
-            if move is None:
-                rewards.append(-3.0)  # Failed to extract
-                continue
-
-            if move not in legal:
-                rewards.append(-4.0)  # Illegal move
-                continue
 
             # Use cached evaluation
             cp_pred = _evaluate_move(position_fen, move, depth)

@@ -1,11 +1,36 @@
 import re
+
 from src.config import (
-    rationale_tag,
+    close_move_tag,
     close_rationale_tag,
     move_tag,
-    close_move_tag,
-    name_used
+    name_used,
+    rationale_tag,
 )
+
+
+def extract_rationale(text):
+    """
+    Extract rationale independently from text.
+    Returns: rationale text or None
+    """
+    pattern = rf"{rationale_tag}\s*(.+?)\s*{close_rationale_tag}"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def extract_move(text):
+    """
+    Extract UCI move independently from text.
+    Returns: move string or None
+    """
+    pattern = rf"{move_tag}\s*(.+?)\s*{close_move_tag}"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return None
 
 
 def extract_xml_answer(text):
