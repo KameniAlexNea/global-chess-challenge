@@ -35,8 +35,8 @@ from src.rewards import (
 from src.tokenizer_utils import ensure_chat_template
 
 # Model selection
-model_name = "unsloth/Qwen3-4B-unsloth-bnb-4bit"  # Start from SFT checkpoint
-tokenizer_name = "unsloth/Qwen3-4B-unsloth-bnb-4bit"
+model_name = "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit"  # Start from SFT checkpoint
+tokenizer_name = "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit"
 
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, fix_mistral_regex=True)
 tokenizer = ensure_chat_template(tokenizer)
@@ -104,7 +104,7 @@ model = AutoModelForCausalLM.from_pretrained(
 
 model = prepare_model_for_kbit_training(
     model,
-    use_gradient_checkpointing=False,
+    use_gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
 )
 
@@ -115,22 +115,20 @@ training_args = GRPOConfig(
     lr_scheduler_type="cosine",
     logging_steps=20,
     max_steps=5000,
-    per_device_train_batch_size=4,  # Reduced for faster iterations
+    per_device_train_batch_size=8,  # Reduced for faster iterations
     gradient_accumulation_steps=8,  # Maintain effective batch size
-    gradient_checkpointing=False,  # Disabled for speed
-    gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
     # GRPO specific
-    max_completion_length=256,  # Shorter for speed (rationale + move)
+    max_completion_length=64,  # Shorter for speed (rationale + move)
     num_generations=4,  # Reduced from 8 for 2x speed boost
     beta=0.01,  # KL penalty
-    top_k=30,
-    top_p=0.9,
+    top_k=64,
+    top_p=0.95,
     temperature=1.0,
     generation_kwargs={
         "max_length": 1024,
-        "max_new_tokens": 256,  # Match max_completion_length
-        "max_time": 15,  # Reduced timeout
+        "max_new_tokens": 64,  # Match max_completion_length
+        "max_time": 30,  # Reduced timeout
         # "length_penalty": 0.5,
     },
     # Logging

@@ -25,6 +25,8 @@ def get_model_template(tokenizer, model_config=None):
             model_type = "llama"
         elif "qwen" in model_name:
             model_type = "qwen"
+        elif "gemma" in model_name:
+            model_type = "gemma"
         elif "granite" in model_name:
             model_type = "granite"
         elif "mistral" in model_name:
@@ -51,6 +53,36 @@ def get_model_template(tokenizer, model_config=None):
             "{%- endfor %}"
             "{%- if add_generation_prompt %}"
             "{{- '<|im_start|>assistant\\n' }}"
+            "{%- endif %}"
+        )
+
+    # Gemma format: <start_of_turn> and <end_of_turn>
+    if "<start_of_turn>" in special_tokens or model_type == "gemma":
+        return (
+            "{%- set default_system = 'You are a chess expert playing a game. Analyze positions carefully and respond with both a rationale explaining your reasoning and your move in UCI notation using <rationale></rationale> and <uci_move></uci_move> tags.' %}"
+            "{{ bos_token }}"
+            "{%- if messages[0]['role'] == 'system' %}"
+            "{%- set first_user_prefix = messages[0]['content'] + '\\n' %}"
+            "{%- set loop_messages = messages[1:] %}"
+            "{%- else %}"
+            "{%- set first_user_prefix = default_system + '\\n' %}"
+            "{%- set loop_messages = messages %}"
+            "{%- endif %}"
+            "{%- for message in loop_messages %}"
+            "{%- if (message['role'] == 'user') != (loop.index0 % 2 == 0) %}"
+            "{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}"
+            "{%- endif %}"
+            "{%- if (message['role'] == 'assistant') %}"
+            "{%- set role = 'model' %}"
+            "{%- else %}"
+            "{%- set role = message['role'] %}"
+            "{%- endif %}"
+            "{{ '<start_of_turn>' + role + '\\n' + (first_user_prefix if loop.first else '') }}"
+            "{{ message['content'] | trim }}"
+            "{{ '<end_of_turn>\\n' }}"
+            "{%- endfor %}"
+            "{%- if add_generation_prompt %}"
+            "{{'<start_of_turn>model\\n'}}"
             "{%- endif %}"
         )
 
@@ -130,6 +162,8 @@ def ensure_chat_template(tokenizer, model_config=None):
         # Identify which template was used
         if "<|im_start|>" in template:
             template_name = "Qwen/ChatML"
+        elif "<start_of_turn>" in template:
+            template_name = "Gemma"
         elif "<|start_header_id|>" in template:
             template_name = "Llama 3"
         elif "<|start_of_role|>" in template:
