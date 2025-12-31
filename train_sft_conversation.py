@@ -6,7 +6,7 @@ import os
 
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import torch
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -19,6 +19,13 @@ from transformers import (
 )
 
 from src.sft_data import load_sft_sequences_dataset
+
+
+def _get_device_map_for_kbit_training() -> dict[str, int] | None:
+    if not torch.cuda.is_available():
+        return None
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    return {"": local_rank}
 
 model_name = "unsloth/gemma-3-270m-it-unsloth-bnb-4bit"
 
@@ -49,7 +56,7 @@ bnb_config = BitsAndBytesConfig(
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     # quantization_config=bnb_config,
-    device_map={"": 0},
+    device_map=_get_device_map_for_kbit_training(),
 )
 
 model = prepare_model_for_kbit_training(model)

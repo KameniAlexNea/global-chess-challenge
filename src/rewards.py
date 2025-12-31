@@ -71,6 +71,26 @@ def format_reward_func(completions, **kwargs):
     return rewards
 
 
+def combined_format_reward_func(completions, **kwargs):
+    """
+    Combined reward for both rationale and move tags.
+    Reduces variance from correlated rewards.
+    +2.0 if both present, -1.0 otherwise.
+    """
+    rewards = []
+    for completion in completions:
+        try:
+            rationale = extract_rationale(completion)
+            move = extract_move(completion)
+            if rationale is not None and move is not None:
+                rewards.append(2.0)
+            else:
+                rewards.append(-1.0)
+        except:
+            rewards.append(-1.0)
+    return rewards
+
+
 def rationale_format_reward_func(completions, **kwargs):
     """
     Reward for having rationale tags, independent of move tags.
@@ -99,10 +119,23 @@ def move_format_reward_func(completions, **kwargs):
     return rewards
 
 
+def token_penalty_reward_func(completions, **kwargs):
+    """
+    Linear penalty per token to discourage verbosity.
+    Forces model to minimize tokens used.
+    """
+    rewards = []
+    for completion in completions:
+        token_count = len(completion.split())
+        rewards.append(-0.002 * token_count)  # Small penalty per token
+    return rewards
+
+
 def rationale_length_reward_func(completions, **kwargs):
     """
     Reward for concise rationale (one sentence, < 150 chars).
     Encourages brief, focused explanations.
+    Note: Use with token_penalty_reward_func for best results.
     """
     rewards = []
     for completion in completions:
@@ -179,23 +212,29 @@ def stockfish_eval_reward_func(
     Continuous reward based on Stockfish evaluation.
     Compares move quality using centipawn evaluation from current position.
     Uses LRU caching for ~2x speedup on repeated positions.
-    Uses independent move extraction.
+    Short-circuits early for invalid/illegal moves to avoid expensive Stockfish calls.
+    
+    Args:
+        depth: Stockfish search depth. Use 1 early in training, 3+ later.
     """
     rewards = []
 
     for completion, correct, position_fen, legal in zip(
         completions, correct_move, fen, legal_moves
     ):
+        # Short-circuit: extract move first (cheap)
+        move = extract_move(completion)
+        
+        if move is None:
+            rewards.append(-3.0)  # Failed to extract - no Stockfish call needed
+            continue
+
+        if move not in legal:
+            rewards.append(-4.0)  # Illegal move - no Stockfish call needed
+            continue
+        
+        # Only call Stockfish for valid moves
         try:
-            move = extract_move(completion)
-
-            if move is None:
-                rewards.append(-3.0)  # Failed to extract
-                continue
-
-            if move not in legal:
-                rewards.append(-4.0)  # Illegal move
-                continue
 
             # Use cached evaluation
             cp_pred = _evaluate_move(position_fen, move, depth)

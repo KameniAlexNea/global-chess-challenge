@@ -15,7 +15,7 @@ You will receive:
 {{FEN}}
 - **Side to Move:** (either 'White' or 'Black')
 {{side_to_move}}
-- **Legal Moves:** (space-separated UCI moves, e.g., `e2e4 g1f3`)
+- **Legal Moves:** (space-separated UCI moves)
 {{legal_moves_uci}}
 
 ## FEN Explanation
@@ -26,11 +26,11 @@ FEN (Forsyth-Edwards Notation) encodes a chess board position using single lette
 # Task
 Select the best move from the provided legal moves list. If no legal moves exist, determine if it's checkmate or stalemate.
 
-1. `{move_tag}xxxx{close_move_tag}` - The selected 4 digits move in UCI format
-2. `{rationale_tag}...{close_rationale_tag}` - A single concise sentence explaining your move choice
+1. `{rationale_tag}...{close_rationale_tag}` - A single concise sentence explaining your move choice
+2. `{move_tag}xxxx{close_move_tag}` - The selected valid move in UCI format
 
 If no legal moves exist, output only: use 0000 for null moves
-`{move_tag}0000{close_move_tag}{rationale_tag}no legal moves available{close_rationale_tag}`
+`{rationale_tag}no legal moves available{close_rationale_tag}{move_tag}0000{close_move_tag}`
 
 Do NOT include any other text, explanations, or formatting.
 """
