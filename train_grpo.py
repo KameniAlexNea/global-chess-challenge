@@ -7,15 +7,16 @@ import os
 
 os.environ["WANDB_PROJECT"] = "global-chess-challenge"
 os.environ["WANDB_WATCH"] = "none"
-os.environ["WANDB_DISABLE_CODE"] = "true"
-os.environ["WANDB_DISABLE_SERVICE"] = "true"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import random
 
 import torch
+from transformers import GenerationConfig
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import GRPOConfig, GRPOTrainer
+from peft import prepare_model_for_kbit_training
 
 from src.config import (
     close_move_tag,
@@ -34,8 +35,8 @@ from src.rewards import (
 from src.tokenizer_utils import ensure_chat_template
 
 # Model selection
-model_name = "models/chess-sft-warmup-merged"  # Start from SFT checkpoint
-tokenizer_name = "models/chess-sft-warmup-merged"
+model_name = "unsloth/Qwen3-4B-unsloth-bnb-4bit"  # Start from SFT checkpoint
+tokenizer_name = "unsloth/Qwen3-4B-unsloth-bnb-4bit"
 
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, fix_mistral_regex=True)
 tokenizer = ensure_chat_template(tokenizer)
@@ -86,12 +87,25 @@ print(
 )
 print()
 
-# 4-bit quantization config for faster loading and less memory
+# Load model
+print("Loading model...")
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_use_double_quant=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.bfloat16,
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    quantization_config=bnb_config,
+    device_map={"": 0},
+)
+
+model = prepare_model_for_kbit_training(
+    model,
+    use_gradient_checkpointing=False,
+    gradient_checkpointing_kwargs={"use_reentrant": False},
 )
 
 # GRPO Training config
@@ -106,23 +120,17 @@ training_args = GRPOConfig(
     gradient_checkpointing=False,  # Disabled for speed
     gradient_checkpointing_kwargs={"use_reentrant": False},
     bf16=True,
-    # Model loading
-    model_init_kwargs={
-        "quantization_config": bnb_config,
-        # "device_map": {"": 0},  # Force single GPU
-        "dtype": torch.bfloat16,
-    },
     # GRPO specific
     max_completion_length=128,  # Room for rationale + move
     num_generations=8,  # Sample multiple completions
     beta=0.01,  # KL penalty
-    top_k=50,
-    top_p=0.95,
+    top_k=30,
+    top_p=0.9,
     temperature=1.0,
     generation_kwargs={
-        "max_length": 1024,
         "max_new_tokens": 128,
         "max_time": 30,
+        "length_penalty": -1.0,
     },
     # Logging
     report_to="wandb",
@@ -169,7 +177,8 @@ print("  5. Stockfish eval (move quality vs best move)")
 print("=" * 80 + "\n")
 
 trainer = GRPOTrainer(
-    model=model_name,
+    model=model,
+    processing_class=tokenizer,
     reward_funcs=[
         rationale_format_reward_func,
         move_format_reward_func,
