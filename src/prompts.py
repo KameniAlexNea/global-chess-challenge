@@ -10,7 +10,6 @@ system_msg = "You are a chess expert. Analyze positions carefully and find the b
 user_msg = f"""Internally analyze the given chess position and select the best move for the side to move.
 
 # Context
-You will receive:
 - **Position (FEN):**
 {{FEN}}
 - **Side to Move:** (either 'White' or 'Black')
@@ -41,7 +40,6 @@ Do NOT include any other text, explanations, or formatting.
 user_msg_pv_line = f"""Internally analyze the given chess position and select the best move for the side to move.
 
 # Context
-You will receive:
 - **Position (FEN):**
 {{FEN}}
 - **Side to Move:** (either 'White' or 'Black')
