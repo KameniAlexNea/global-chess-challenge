@@ -86,13 +86,19 @@ def create_single_move_example(line_data: Dict, line_k: int = 6) -> Dict:
     return {"prompt": prompt_text, "response": response}
 
 
-def create_conversation_example(line_data: Dict) -> Optional[Dict]:
+def create_conversation_example(line_data: Dict, max_user_moves: int = 2) -> Optional[Dict]:
     """
     Create a full multi-turn conversation from a move sequence.
 
     Format: Each message includes position (FEN) and legal moves.
     Both user and assistant respond with <uci_move>xxxx</uci_move>.
     This gives the model full context at each turn.
+
+    Args:
+        line_data: Dict with at least {"fen", "line"}
+        max_user_moves: Cap the number of *user moves* included in the conversation.
+            User turns are the verbose ones (they include the move + FEN + legal moves),
+            so this is a more reliable knob for controlling token length.
     """
     fen = line_data["fen"]
     moves = line_data["line"].split()
@@ -124,6 +130,8 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
     messages = [{"role": "system", "content": system_message}]
     has_assistant_move = False
     last_user_move = None
+    assistant_moves_added = 0
+    user_moves_presented = 0
 
     # Randomly decide whether the first move is produced immediately by the assistant
     # (only possible if it's the assistant's turn in the starting position).
@@ -154,6 +162,7 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
                     {"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"}
                 )
                 start_with_assistant = False
+                assistant_moves_added += 1
             else:
                 if last_user_move is None:
                     # Assistant moves first (user provides starting state)
@@ -162,18 +171,24 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
                         legal_moves_uci=legal_moves_uci,
                     )
                 else:
+                    # If we've already included enough user moves, stop before adding
+                    # another verbose user state update.
+                    if max_user_moves > 0 and user_moves_presented >= max_user_moves:
+                        break
                     # User moved, show their move then position
                     user_content = conversation_user_msg_after_move.format(
                         last_user_move=last_user_move,
                         FEN=current_fen,
                         legal_moves_uci=legal_moves_uci,
                     )
+                    user_moves_presented += 1
 
                 last_user_move = None
                 messages.append({"role": "user", "content": user_content})
                 messages.append(
                     {"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"}
                 )
+                assistant_moves_added += 1
             has_assistant_move = True
         else:
             # User's turn - store move to show later
@@ -192,13 +207,19 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
     if len(messages) < 2:
         return None
 
-    return {"messages": messages, "num_moves": len(moves)}
+    return {
+        "messages": messages,
+        "num_moves": len(moves),
+        "assistant_moves": assistant_moves_added,
+        "user_moves": user_moves_presented,
+    }
 
 
 def load_sft_text_examples(
     data_file: str = "data/processed/move_sequences_500mb.jsonl",
     num_samples: int = 100,
     mode: Literal["single_move", "conversation"] = "single_move",
+    max_user_moves: int = 2,
     seed: int = 42,
 ):
     """
@@ -249,7 +270,9 @@ def load_sft_text_examples(
 
         elif mode == "conversation":
             # Create conversation example
-            result = create_conversation_example(line_data)
+            result = create_conversation_example(
+                line_data, max_user_moves=max_user_moves
+            )
             if result is not None:
                 # Convert messages to strings for dataset storage
                 messages_text = []
@@ -262,6 +285,8 @@ def load_sft_text_examples(
                         "messages": result["messages"],
                         "messages_text": "\n\n".join(messages_text),
                         "num_moves": result["num_moves"],
+                        "assistant_moves": result.get("assistant_moves", None),
+                        "user_moves": result.get("user_moves", None),
                         "fen": line_data["fen"],
                         "line": line_data["line"],
                         "depth": line_data["depth"],
@@ -408,6 +433,7 @@ def load_sft_sequences_dataset(
     train_samples: int = 1_000_000,
     test_size: float = 0.01,
     max_length: int = 1024,
+    max_user_moves: int = 2,
     num_proc: int = 16,
     seed: int = 42,
 ):
@@ -468,7 +494,9 @@ def load_sft_sequences_dataset(
         }
 
         # Create conversation
-        result = create_conversation_example(line_data)
+        result = create_conversation_example(
+            line_data, max_user_moves=max_user_moves
+        )
 
         if result is None:
             return {

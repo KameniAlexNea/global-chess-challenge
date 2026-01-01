@@ -48,7 +48,7 @@ def _wait_for_everyone() -> None:
         torch.distributed.barrier()
 
 
-NAME = "unsloth/gemma-3-270m-it-unsloth-bnb-4bit"
+NAME = "unsloth/Qwen2.5-Coder-0.5B-Instruct-bnb-4bit"
 
 
 def main() -> None:
@@ -63,11 +63,12 @@ def main() -> None:
     sft_train, sft_eval = load_sft_sequences_dataset(
         tokenizer=tokenizer,
         data_file="data/processed/move_sequences_500mb.jsonl",
-        train_samples=500_000,
+        train_samples=1_000_000,
         test_size=0.01,
-        max_length=2048,
+        max_length=1024,
         num_proc=16,
         seed=42,
+        max_user_moves=2,
     )
 
     # Load model
@@ -112,8 +113,8 @@ def main() -> None:
     training_args = TrainingArguments(
         output_dir="models/chess-sft-conversation",
         num_train_epochs=1,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=16,
+        per_device_train_batch_size=16,
+        gradient_accumulation_steps=8,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=500,
@@ -129,6 +130,7 @@ def main() -> None:
         dataloader_num_workers=4,
         dataloader_pin_memory=True,
         ddp_find_unused_parameters=False,
+        torch_compile=True
     )
 
     trainer = Trainer(
