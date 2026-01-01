@@ -59,7 +59,7 @@ def _torch_dtype_from_arg(dtype: str) -> torch.dtype:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--adapter_dir", type=str, required=True)
-    p.add_argument("--repo_id", type=str, required=True)
+    p.add_argument("--repo_id", type=str, default=None)
     p.add_argument("--base_model", type=str, default=None)
     p.add_argument("--output_dir", type=str, default=None)
     p.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16", "fp32"])
@@ -67,6 +67,9 @@ def main() -> None:
     p.add_argument("--private", action="store_true")
     p.add_argument("--no_push", action="store_true", help="Only save locally; do not push.")
     args = p.parse_args()
+
+    if args.repo_id is None:
+        args.no_push = True
 
     adapter_dir = Path(args.adapter_dir).resolve()
     if not adapter_dir.exists():
