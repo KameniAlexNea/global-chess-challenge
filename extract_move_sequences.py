@@ -64,7 +64,12 @@ def extract_line_data(record: Dict) -> Dict | None:
         return None
 
 
-def process_eval_file(input_file: Path, output_file: Path, target_size_mb: float = 500, skip_size_mb: float = 0):
+def process_eval_file(
+    input_file: Path,
+    output_file: Path,
+    target_size_mb: float = 500,
+    skip_size_mb: float = 0,
+):
     """
     Process eval file and extract lines (full move sequences).
 
@@ -105,18 +110,20 @@ def process_eval_file(input_file: Path, output_file: Path, target_size_mb: float
                 while bytes_skipped < skip_bytes:
                     chunk = reader.read(chunk_size)
                     if not chunk:
-                        print(f"\nWarning: File ended at {bytes_skipped/1024/1024:.1f}MB (before skip target)")
+                        print(
+                            f"\nWarning: File ended at {bytes_skipped/1024/1024:.1f}MB (before skip target)"
+                        )
                         pbar_skip.close()
                         return
-                    
+
                     bytes_skipped += len(chunk)
                     pbar_skip.update(len(chunk))
-                    
+
                     # Process buffer to stay aligned with record boundaries
                     buffer += chunk.decode("utf-8")
                     lines = buffer.split("\n")
                     buffer = lines[-1]  # Keep incomplete line
-                
+
                 pbar_skip.close()
                 print(f"Skipped {bytes_skipped/1024/1024:.1f}MB")
 
@@ -207,6 +214,7 @@ def process_eval_file(input_file: Path, output_file: Path, target_size_mb: float
         print(f"  Depth: {line_data['depth']}")
         print(f"  Knodes: {line_data['knodes']}")
 
+
 def get_args_parser():
     import argparse
 
@@ -239,17 +247,21 @@ def get_args_parser():
     )
     return parser
 
+
 if __name__ == "__main__":
     args = get_args_parser().parse_args()
     input_file = Path(args.input_file)
-    output_file = Path(args.output_folder) / f"move_sequences_{args.skip_size_mb}-{int(args.target_size_mb)}mb.jsonl"
+    output_file = (
+        Path(args.output_folder)
+        / f"move_sequences_{args.skip_size_mb}-{int(args.target_size_mb)}mb.jsonl"
+    )
 
     # Extract from ~500MB of compressed data
     # Store full lines - training will pick split points on-the-fly
     # To extract from 500MB-1000MB range, set skip_size_mb=500
     process_eval_file(
-        input_file=input_file, 
-        output_file=output_file, 
+        input_file=input_file,
+        output_file=output_file,
         target_size_mb=args.target_size_mb,
-        skip_size_mb=args.skip_size_mb  # Set to 500 to extract the next 500MB (500-1000MB range)
+        skip_size_mb=args.skip_size_mb,  # Set to 500 to extract the next 500MB (500-1000MB range)
     )

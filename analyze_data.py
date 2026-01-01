@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
 """
-Quick analysis script for chess datasets.
-Explores the Lichess puzzle and evaluation datasets.
+Lightweight inspection script for chess datasets.
+
+This script ONLY analyzes and prints:
+- file existence and size
+- basic schema (columns/keys)
+- a small sample of rows
+
+It does not extract, filter, or write any new datasets.
 """
 
 import csv
 import json
-import sys
 from collections import Counter
+from io import TextIOWrapper
 from pathlib import Path
+from typing import Optional
 
 import zstandard as zstd
 
 
-def analyze_puzzles(file_path: str, sample_size: int = 1000):
+def _format_bytes(num_bytes: int) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if num_bytes < 1024 or unit == "TB":
+            return f"{num_bytes:.1f} {unit}" if unit != "B" else f"{num_bytes} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} TB"
+
+
+def analyze_puzzles(file_path: str, sample_size: int = 1000) -> None:
     """
     Analyze the puzzle dataset structure and content.
 
@@ -21,16 +36,18 @@ def analyze_puzzles(file_path: str, sample_size: int = 1000):
         file_path: Path to lichess_db_puzzle.csv.zst
         sample_size: Number of puzzles to sample for analysis
     """
+    path = Path(file_path)
     print("=" * 80)
-    print("ANALYZING PUZZLE DATASET")
+    print("PUZZLE DATASET (lichess_db_puzzle.csv.zst)")
     print("=" * 80)
-
-    if not Path(file_path).exists():
-        print(f"❌ File not found: {file_path}")
+    print(f"Path: {path}")
+    if not path.exists():
+        print("Status: missing")
+        print()
         return
-
-    print(f"📁 File: {file_path}")
-    print(f"📊 Sampling first {sample_size} puzzles...\n")
+    print("Status: found")
+    print(f"Compressed size: {_format_bytes(path.stat().st_size)}")
+    print(f"Sample rows: {sample_size}")
 
     dctx = zstd.ZstdDecompressor()
 
@@ -38,67 +55,66 @@ def analyze_puzzles(file_path: str, sample_size: int = 1000):
     themes_counter = Counter()
     move_counts = []
 
-    with open(file_path, "rb") as compressed:
+    examples_printed = 0
+    with open(path, "rb") as compressed:
         with dctx.stream_reader(compressed) as reader:
-            text_stream = reader.read().decode("utf-8").splitlines()
-            csv_reader = csv.DictReader(text_stream)
+            text = TextIOWrapper(reader, encoding="utf-8")
+            csv_reader = csv.DictReader(text)
 
-            print("📋 Column names:")
-            print(f"   {', '.join(csv_reader.fieldnames)}\n")
+            print("Columns:")
+            print(", ".join(csv_reader.fieldnames or []))
+            print()
 
             for i, row in enumerate(csv_reader):
                 if i >= sample_size:
                     break
 
-                # Collect statistics
-                if row["Rating"]:
-                    ratings.append(int(row["Rating"]))
+                rating = row.get("Rating")
+                if rating:
+                    try:
+                        ratings.append(int(rating))
+                    except ValueError:
+                        pass
 
-                if row["Themes"]:
-                    for theme in row["Themes"].split():
+                themes = row.get("Themes")
+                if themes:
+                    for theme in themes.split():
                         themes_counter[theme] += 1
 
-                if row["Moves"]:
-                    move_counts.append(len(row["Moves"].split()))
+                moves = row.get("Moves")
+                if moves:
+                    move_counts.append(len(moves.split()))
 
-                # Print first 5 as examples
-                if i < 5:
-                    print(f"Example {i+1}:")
-                    print(f"  PuzzleId: {row['PuzzleId']}")
-                    print(f"  FEN: {row['FEN']}")
-                    print(f"  Moves: {row['Moves']}")
-                    print(f"  Rating: {row['Rating']}")
-                    print(f"  Themes: {row['Themes']}")
-                    print(f"  GameUrl: {row['GameUrl']}")
+                if examples_printed < 3:
+                    examples_printed += 1
+                    print(f"Example {examples_printed}:")
+                    print(f"  PuzzleId: {row.get('PuzzleId')}")
+                    print(f"  FEN: {row.get('FEN')}")
+                    print(f"  Moves: {row.get('Moves')}")
+                    print(f"  Rating: {row.get('Rating')}")
+                    print(f"  Themes: {row.get('Themes')}")
+                    print(f"  GameUrl: {row.get('GameUrl')}")
                     print()
 
-    # Statistics
-    print("\n" + "=" * 80)
-    print("STATISTICS")
-    print("=" * 80)
-
+    print("Summary:")
     if ratings:
-        print(f"\n📊 Rating Distribution (n={len(ratings)}):")
-        print(f"   Min: {min(ratings)}")
-        print(f"   Max: {max(ratings)}")
-        print(f"   Mean: {sum(ratings) / len(ratings):.0f}")
-        print(f"   Median: {sorted(ratings)[len(ratings)//2]}")
-
-    if themes_counter:
-        print(f"\n🎯 Top 20 Most Common Themes:")
-        for theme, count in themes_counter.most_common(20):
-            print(f"   {theme:25s} : {count:4d} ({count/sample_size*100:.1f}%)")
-
+        ratings_sorted = sorted(ratings)
+        print(
+            f"  Ratings: n={len(ratings)} min={min(ratings)} max={max(ratings)} mean={sum(ratings)/len(ratings):.0f} median={ratings_sorted[len(ratings_sorted)//2]}"
+        )
     if move_counts:
-        print(f"\n♟️  Moves per Puzzle:")
-        print(f"   Min: {min(move_counts)}")
-        print(f"   Max: {max(move_counts)}")
-        print(f"   Mean: {sum(move_counts) / len(move_counts):.1f}")
-
+        print(
+            f"  Moves per puzzle: n={len(move_counts)} min={min(move_counts)} max={max(move_counts)} mean={sum(move_counts)/len(move_counts):.1f}"
+        )
+    if themes_counter:
+        top = themes_counter.most_common(10)
+        print("  Top themes:")
+        for theme, count in top:
+            print(f"    {theme}: {count}")
     print()
 
 
-def analyze_evaluations(file_path: str, sample_size: int = 100):
+def analyze_evaluations(file_path: str, sample_size: int = 100) -> None:
     """
     Analyze the evaluation dataset structure and content.
 
@@ -106,17 +122,18 @@ def analyze_evaluations(file_path: str, sample_size: int = 100):
         file_path: Path to lichess_db_eval.jsonl.zst
         sample_size: Number of evaluations to sample
     """
+    path = Path(file_path)
     print("=" * 80)
-    print("ANALYZING EVALUATION DATASET")
+    print("EVALUATION DATASET (lichess_db_eval.jsonl.zst)")
     print("=" * 80)
-
-    if not Path(file_path).exists():
-        print(f"❌ File not found: {file_path}")
+    print(f"Path: {path}")
+    if not path.exists():
+        print("Status: missing")
+        print()
         return
-
-    print(f"📁 File: {file_path}")
-    print(f"📊 Sampling first {sample_size} positions...")
-    print(f"⚠️  Warning: This is a large file (17GB), decompression may take time...\n")
+    print("Status: found")
+    print(f"Compressed size: {_format_bytes(path.stat().st_size)}")
+    print(f"Sample rows: {sample_size}")
 
     dctx = zstd.ZstdDecompressor()
 
@@ -125,138 +142,129 @@ def analyze_evaluations(file_path: str, sample_size: int = 100):
     pv_counts = []
     eval_types = {"cp": 0, "mate": 0}
 
-    with open(file_path, "rb") as compressed:
+    examples_printed = 0
+    line_count = 0
+
+    with open(path, "rb") as compressed:
         with dctx.stream_reader(compressed) as reader:
-            # Read in chunks to avoid memory issues
-            buffer = b""
-            line_count = 0
-
-            for chunk in iter(
-                lambda: reader.read(100 * 1024 * 1024), b""
-            ):  # 100MB chunks
-                buffer += chunk
-                lines = buffer.split(b"\n")
-                buffer = lines[-1]  # Keep incomplete line in buffer
-
-                for line in lines[:-1]:
-                    if line_count >= sample_size:
-                        break
-
-                    if not line.strip():
-                        continue
-
-                    try:
-                        data = json.loads(line.decode("utf-8"))
-
-                        # Print first 3 as examples
-                        if line_count < 3:
-                            print(f"Example {line_count+1}:")
-                            print(f"  FEN: {data['fen']}")
-                            print(f"  Number of evaluations: {len(data['evals'])}")
-                            for j, eval_data in enumerate(
-                                data["evals"][:2]
-                            ):  # Show first 2 evals
-                                print(f"  Eval {j+1}:")
-                                print(f"    Depth: {eval_data['depth']}")
-                                print(f"    Knodes: {eval_data['knodes']}")
-                                print(f"    PVs: {len(eval_data['pvs'])}")
-                                for k, pv in enumerate(
-                                    eval_data["pvs"][:2]
-                                ):  # Show first 2 PVs
-                                    eval_type = "cp" if "cp" in pv else "mate"
-                                    eval_value = pv.get("cp", pv.get("mate", "N/A"))
-                                    print(
-                                        f"      PV {k+1}: {eval_type}={eval_value}, line={pv['line'][:50]}..."
-                                    )
-                            print()
-
-                        # Collect statistics
-                        for eval_data in data["evals"]:
-                            depths.append(eval_data["depth"])
-                            knodes.append(eval_data["knodes"])
-                            pv_counts.append(len(eval_data["pvs"]))
-
-                            for pv in eval_data["pvs"]:
-                                if "cp" in pv:
-                                    eval_types["cp"] += 1
-                                if "mate" in pv:
-                                    eval_types["mate"] += 1
-
-                        line_count += 1
-
-                    except json.JSONDecodeError:
-                        continue
-
+            text = TextIOWrapper(reader, encoding="utf-8")
+            for line in text:
                 if line_count >= sample_size:
                     break
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-    # Statistics
-    print("\n" + "=" * 80)
-    print("STATISTICS")
-    print("=" * 80)
+                if examples_printed < 3:
+                    examples_printed += 1
+                    print(f"Example {examples_printed}:")
+                    print(f"  Keys: {', '.join(sorted(data.keys()))}")
+                    print(f"  FEN: {data.get('fen')}")
+                    evals = data.get("evals") or []
+                    print(f"  evals: {len(evals)}")
+                    if evals:
+                        first = evals[0]
+                        pvs = first.get("pvs") or []
+                        print(
+                            f"  first eval: depth={first.get('depth')} knodes={first.get('knodes')} pvs={len(pvs)}"
+                        )
+                        if pvs:
+                            pv0 = pvs[0]
+                            ev_type = (
+                                "cp"
+                                if "cp" in pv0
+                                else "mate" if "mate" in pv0 else "unknown"
+                            )
+                            ev_value = pv0.get("cp", pv0.get("mate"))
+                            print(
+                                f"  first PV: {ev_type}={ev_value} line={(pv0.get('line') or '')[:80]}..."
+                            )
+                    print()
 
+                for eval_data in data.get("evals", []):
+                    if "depth" in eval_data:
+                        depths.append(eval_data["depth"])
+                    if "knodes" in eval_data:
+                        knodes.append(eval_data["knodes"])
+                    if "pvs" in eval_data:
+                        pv_counts.append(len(eval_data["pvs"]))
+                        for pv in eval_data["pvs"]:
+                            if "cp" in pv:
+                                eval_types["cp"] += 1
+                            if "mate" in pv:
+                                eval_types["mate"] += 1
+
+                line_count += 1
+
+    print("Summary:")
+    print(f"  Rows read: {line_count}")
     if depths:
-        print(f"\n📊 Depth Distribution (n={len(depths)}):")
-        print(f"   Min: {min(depths)}")
-        print(f"   Max: {max(depths)}")
-        print(f"   Mean: {sum(depths) / len(depths):.1f}")
-
+        print(
+            f"  Depth: n={len(depths)} min={min(depths)} max={max(depths)} mean={sum(depths)/len(depths):.1f}"
+        )
     if knodes:
-        print(f"\n🖥️  Knodes Distribution:")
-        print(f"   Min: {min(knodes)}")
-        print(f"   Max: {max(knodes)}")
-        print(f"   Mean: {sum(knodes) / len(knodes):.0f}")
-
+        print(
+            f"  Knodes: n={len(knodes)} min={min(knodes)} max={max(knodes)} mean={sum(knodes)/len(knodes):.0f}"
+        )
     if pv_counts:
-        print(f"\n🎯 Principal Variations per Evaluation:")
-        print(f"   Min: {min(pv_counts)}")
-        print(f"   Max: {max(pv_counts)}")
-        print(f"   Mean: {sum(pv_counts) / len(pv_counts):.1f}")
-
-    print(f"\n📈 Evaluation Types:")
-    print(f"   Centipawn (cp): {eval_types['cp']}")
-    print(f"   Mate: {eval_types['mate']}")
-
+        print(
+            f"  PVs per eval: n={len(pv_counts)} min={min(pv_counts)} max={max(pv_counts)} mean={sum(pv_counts)/len(pv_counts):.1f}"
+        )
+    print(f"  PV eval types: cp={eval_types['cp']} mate={eval_types['mate']}")
     print()
 
 
-def main():
-    """Run analysis on both datasets."""
+def main(
+    puzzle_file: Optional[str],
+    eval_file: Optional[str],
+    puzzle_samples: int,
+    eval_samples: int,
+) -> None:
     base_dir = Path(__file__).parent
 
-    puzzle_file = base_dir / "lichess_db_puzzle.csv.zst"
-    eval_file = base_dir / "lichess_db_eval.jsonl.zst"
-
-    # Analyze puzzles (fast)
-    analyze_puzzles(str(puzzle_file), sample_size=1000)
-
-    # Analyze evaluations (slower, smaller sample)
-    analyze_evaluations(str(eval_file), sample_size=100)
-
-    print("=" * 80)
-    print("🎉 ANALYSIS COMPLETE")
-    print("=" * 80)
-    print("\n💡 Key Takeaways:")
-    print("   1. Puzzle dataset is structured and ready for quick extraction")
-    print(
-        "   2. Evaluation dataset is large but contains high-quality Stockfish analysis"
+    puzzle_path = (
+        Path(puzzle_file) if puzzle_file else (base_dir / "lichess_db_puzzle.csv.zst")
     )
-    print("   3. Both datasets use standard formats (FEN for positions, UCI for moves)")
-    print("   4. Puzzles include difficulty ratings and tactical themes")
-    print("   5. Evaluations include multiple PVs and depth information")
-    print("\n🚀 Next Steps:")
-    print("   1. Extract puzzle positions for initial training")
-    print("   2. Filter evaluations by depth (>=20) for high quality")
-    print("   3. Create unified training format with both sources")
-    print("   4. Generate rationales from themes and PVs")
+    eval_path = (
+        Path(eval_file) if eval_file else (base_dir / "lichess_db_eval.jsonl.zst")
+    )
+
+    analyze_puzzles(str(puzzle_path), sample_size=puzzle_samples)
+    analyze_evaluations(str(eval_path), sample_size=eval_samples)
 
 
 if __name__ == "__main__":
-    try:
-        import zstandard
-    except ImportError:
-        print("❌ Error: zstandard library not installed")
-        print("📦 Install it with: pip install zstandard")
-        sys.exit(1)
+    import argparse
 
-    main()
+    parser = argparse.ArgumentParser(
+        description="Analyze Lichess puzzle/eval datasets (no extraction)."
+    )
+    parser.add_argument(
+        "--puzzle_file",
+        type=str,
+        default=None,
+        help="Path to lichess_db_puzzle.csv.zst",
+    )
+    parser.add_argument(
+        "--eval_file", type=str, default=None, help="Path to lichess_db_eval.jsonl.zst"
+    )
+    parser.add_argument(
+        "--puzzle_samples",
+        type=int,
+        default=1000,
+        help="Number of puzzle rows to sample",
+    )
+    parser.add_argument(
+        "--eval_samples", type=int, default=100, help="Number of eval rows to sample"
+    )
+    args = parser.parse_args()
+
+    main(
+        puzzle_file=args.puzzle_file,
+        eval_file=args.eval_file,
+        puzzle_samples=args.puzzle_samples,
+        eval_samples=args.eval_samples,
+    )
