@@ -17,6 +17,11 @@ from src.config import (
     rationale_tag,
 )
 from src.prompts import user_msg_pv_line
+from src.prompts import (
+    conversation_system_msg,
+    conversation_user_msg_after_move,
+    conversation_user_msg_first,
+)
 
 
 @lru_cache(maxsize=10000)
@@ -103,15 +108,14 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
     assistant_color_name = "White" if assistant_is_white else "Black"
     user_color_name = "Black" if assistant_is_white else "White"
 
-    # Add system message explaining the game
-    system_message = f"""You are playing chess as {assistant_color_name}. The user is {user_color_name}.
+    # Single system message explaining the rules and roles.
+    # The rest of the conversation alternates user state updates and assistant moves.
+    system_message = conversation_system_msg.format(
+        assistant_color_name=assistant_color_name,
+        user_color_name=user_color_name,
+        starting_fen=fen,
+    )
 
-Starting position (FEN): {fen}
-
-Moves are in UCI notation inside <uci_move></uci_move> tags. Each move alternates the board state.
-You will receive the current position and legal moves, then respond with your move in the same format."""
-
-    # Build conversation
     messages = [{"role": "system", "content": system_message}]
     has_assistant_move = False
     last_user_move = None
@@ -123,24 +127,28 @@ You will receive the current position and legal moves, then respond with your mo
             move = chess.Move.from_uci(move_uci)
             if move not in board.legal_moves:
                 break
-        except:
+        except Exception:
             break
 
         if current_turn == assistant_color:
             # Assistant's turn - show position + legal moves, assistant responds
             current_fen = board.fen()
             legal_moves = [m.uci() for m in board.legal_moves]
+            legal_moves_uci = " ".join(legal_moves)
 
             if last_user_move is None:
                 # Assistant moves first
-                user_content = f"""Position: {current_fen}
-Legal moves: {' '.join(legal_moves)}"""
+                user_content = conversation_user_msg_first.format(
+                    FEN=current_fen,
+                    legal_moves_uci=legal_moves_uci,
+                )
             else:
                 # User moved, show their move then position
-                user_content = f"""<uci_move>{last_user_move}</uci_move>
-
-Position: {current_fen}
-Legal moves: {' '.join(legal_moves)}"""
+                user_content = conversation_user_msg_after_move.format(
+                    last_user_move=last_user_move,
+                    FEN=current_fen,
+                    legal_moves_uci=legal_moves_uci,
+                )
 
             last_user_move = None
             messages.append({"role": "user", "content": user_content})

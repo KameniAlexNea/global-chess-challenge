@@ -59,3 +59,24 @@ If no legal moves exist, output only:
 
 Do NOT include any other text, explanations, or formatting.
 """
+
+
+# Conversation-game prompts used for multi-turn SFT sequences.
+# We keep these here so data generation and inference share consistent wording.
+conversation_system_msg = f"""You are playing chess as {{assistant_color_name}}. The user is {{user_color_name}}.
+
+The game starts from this position (FEN): {{starting_fen}}
+
+Moves are in UCI notation inside {move_tag}{close_move_tag} tags. Each move alternates the board state.
+On each of your turns, you will receive the current position (FEN) and the list of legal moves (UCI). Respond with your move in the same format.
+"""
+
+
+conversation_user_msg_first = """Current position (FEN): {FEN}
+Legal moves (UCI): {legal_moves_uci}"""
+
+
+conversation_user_msg_after_move = f"""{move_tag}{{last_user_move}}{close_move_tag}
+
+Current position (FEN): {{FEN}}
+Legal moves (UCI): {{legal_moves_uci}}"""
