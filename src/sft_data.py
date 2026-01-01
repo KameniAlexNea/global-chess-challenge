@@ -10,6 +10,14 @@ import chess
 from datasets import Dataset, load_dataset
 from transformers import PreTrainedTokenizer
 
+from src.config import (
+    close_move_tag,
+    close_rationale_tag,
+    move_tag,
+    rationale_tag,
+)
+from src.prompts import user_msg_pv_line
+
 
 @lru_cache(maxsize=10000)
 def get_board_at_position(fen: str, moves_tuple: tuple) -> chess.Board:
@@ -21,11 +29,15 @@ def get_board_at_position(fen: str, moves_tuple: tuple) -> chess.Board:
     return board.copy()
 
 
-def create_single_move_example(line_data: Dict) -> Dict:
+def create_single_move_example(line_data: Dict, line_k: int = 6) -> Dict:
     """
     Randomly pick a split point in the line and create training example.
 
-    This creates a single Q&A pair: given a position, predict the next best move.
+        This creates a single Q&A pair: given a position, predict the next best move
+        and provide a short principal-variation style continuation.
+
+        Target format:
+            <rationale>{k-move PV in UCI}</rationale><uci_move>{next_move}</uci_move>
     """
     fen = line_data["fen"]
     moves = line_data["line"].split()
@@ -40,21 +52,31 @@ def create_single_move_example(line_data: Dict) -> Dict:
     # Get next move to predict
     next_move = moves[split_idx]
 
+    # PV continuation from this position (includes next_move as first move)
+    if line_k <= 0:
+        pv_moves: list[str] = [next_move]
+    else:
+        pv_moves = moves[split_idx : split_idx + line_k]
+        if not pv_moves:
+            pv_moves = [next_move]
+
     # Get legal moves
     legal_moves = [m.uci() for m in board.legal_moves]
     side_to_move = "White" if board.turn == chess.WHITE else "Black"
 
-    # Create prompt
-    prompt_text = f"""Analyze this chess position and find the BEST move.
-
-Position (FEN): {board.fen()}
-Side to move: {side_to_move}
-Legal moves: {' '.join(legal_moves)}
-
-Provide the best move in <uci_move> tags."""
+    # Create prompt (aligned with src/prompts.py)
+    prompt_text = user_msg_pv_line.format(
+        FEN=board.fen(),
+        side_to_move=side_to_move,
+        legal_moves_uci=" ".join(legal_moves),
+    )
 
     # Create response
-    response = f"<uci_move>{next_move}</uci_move>"
+    pv_text = " ".join(pv_moves)
+    response = (
+        f"{rationale_tag}{pv_text}{close_rationale_tag}"
+        f"{move_tag}{next_move}{close_move_tag}"
+    )
 
     return {"prompt": prompt_text, "response": response}
 
@@ -236,6 +258,7 @@ def load_sft_single_move_dataset(
     train_samples: int = 1_000_000,
     test_size: float = 0.01,
     max_length: int = 512,
+    line_k: int = 6,
     num_proc: int = 16,
     seed: int = 42,
 ):
@@ -244,7 +267,7 @@ def load_sft_single_move_dataset(
 
     Each training example: given a position, predict the next best move.
     Uses random splits so same line generates different examples.
-    Only trains on tokens between <uci_move> and </uci_move> tags in the response.
+    Trains on the full assistant response (including <rationale> and <uci_move>).
 
     Args:
         tokenizer: The tokenizer to use
@@ -259,40 +282,6 @@ def load_sft_single_move_dataset(
         Tuple of (train_dataset, eval_dataset) ready for training
     """
 
-    # Get token IDs for "uci_move" - appears in both <uci_move> and </uci_move>
-    uci_move_tokens = tokenizer.encode("uci_move", add_special_tokens=False)
-
-    def find_subsequence(seq, subseq):
-        """Find all starting positions of subseq in seq."""
-        positions = []
-        for i in range(len(seq) - len(subseq) + 1):
-            if seq[i : i + len(subseq)] == subseq:
-                positions.append(i)
-        return positions
-
-    def find_move_token_positions(input_ids: list, start_pos: int = 0) -> list:
-        """Find positions of move tokens (ONLY the LAST <uci_move>...</uci_move> tags)."""
-        # Find all occurrences of "uci_move" tokens
-        occurrences = find_subsequence(input_ids, uci_move_tokens)
-        
-        if len(occurrences) < 2:
-            return []
-
-        # Take only the LAST pair (response), ignore any in the prompt
-        last_open = occurrences[-2]
-        last_close = occurrences[-1]
-        
-        # Include full tags: from < before first uci_move to > after second uci_move
-        start = last_open - 1  # Include < before uci_move
-        end = last_close + len(uci_move_tokens) + 1  # Include > after uci_move
-        
-        positions = []
-        for pos in range(start, end):
-            if 0 <= pos < len(input_ids):
-                positions.append(pos)
-
-        return positions
-
     def format_for_sft(example):
         """Format a single example for supervised learning with label masking."""
         line_data = {
@@ -302,45 +291,49 @@ def load_sft_single_move_dataset(
         }
 
         # Create training example with random split
-        training_example = create_single_move_example(line_data)
+        training_example = create_single_move_example(line_data, line_k=line_k)
 
-        # Format as chat
+        # Build prompt token IDs using the chat template.
+        # IMPORTANT: We reserve space for the response so it doesn't get truncated away.
         messages = [{"role": "user", "content": training_example["prompt"]}]
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        prompt_ids = tokenizer.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True
         )
-
-        # Tokenize prompt separately to know where it ends
-        prompt_tokens = tokenizer(
-            prompt,
+        response_ids = tokenizer(
+            training_example["response"] + tokenizer.eos_token,
             add_special_tokens=False,
-        )
-        prompt_length = len(prompt_tokens["input_ids"])
+        )["input_ids"]
 
-        # Full text
-        full_text = prompt + training_example["response"] + tokenizer.eos_token
+        # Truncate prompt to leave room for the response.
+        if len(prompt_ids) + len(response_ids) > max_length:
+            keep = max_length - len(response_ids)
+            if keep < 0:
+                # Degenerate case: response alone exceeds max_length.
+                response_ids = response_ids[:max_length]
+                prompt_ids = []
+            else:
+                prompt_ids = prompt_ids[:keep]
 
-        # Tokenize full text
-        model_inputs = tokenizer(
-            full_text,
-            max_length=max_length,
-            truncation=True,
-            padding="max_length",
-        )
+        input_ids = prompt_ids + response_ids
+        attention_mask = [1] * len(input_ids)
 
-        input_ids = model_inputs["input_ids"]
+        # Pad to max_length.
+        if len(input_ids) < max_length:
+            pad_len = max_length - len(input_ids)
+            input_ids = input_ids + [tokenizer.pad_token_id] * pad_len
+            attention_mask = attention_mask + [0] * pad_len
 
-        # Create labels - only train on move tokens in the response part
+        # Labels: only train on the response portion.
         labels = [-100] * len(input_ids)
-        
-        # Find only the LAST <uci_move> tags (the response, not the prompt)
-        move_positions = find_move_token_positions(input_ids)
-        for pos in move_positions:
-            labels[pos] = input_ids[pos]
+        for pos in range(len(prompt_ids), len(prompt_ids) + len(response_ids)):
+            if 0 <= pos < len(labels) and input_ids[pos] != tokenizer.pad_token_id:
+                labels[pos] = input_ids[pos]
 
-        model_inputs["labels"] = labels
-
-        return model_inputs
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
 
     # Load dataset
     print(f"Loading dataset from {data_file}...")

@@ -11,23 +11,27 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import random
+from functools import wraps
 
 import torch
-from functools import wraps
-from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from peft import LoraConfig, prepare_model_for_kbit_training
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+)
 from trl import GRPOConfig, GRPOTrainer
-from peft import prepare_model_for_kbit_training
 
 from src.data import load_grpo_sequences_dataset
 from src.rewards import (
     combined_format_reward_func,
-    token_penalty_reward_func,
-    rationale_length_reward_func,
     legality_reward_func,
+    rationale_length_reward_func,
     stockfish_eval_reward_func,
+    token_penalty_reward_func,
 )
 from src.tokenizer_utils import ensure_chat_template
+
 
 def _require_ddp_if_multi_gpu() -> None:
     if not torch.cuda.is_available():
@@ -65,7 +69,9 @@ def _scale_reward_func(reward_func, weight: float, name: str | None = None):
     scaled.__qualname__ = scaled.__name__
     return scaled
 
+
 NAME = "unsloth/Qwen2.5-Coder-0.5B-Instruct-bnb-4bit"
+
 
 def main() -> None:
     # Model selection
@@ -186,10 +192,18 @@ def main() -> None:
 
     # Reward weights: make Stockfish the dominant signal while keeping
     # format/legality constraints as shaping rewards.
-    stockfish_reward = _scale_reward_func(stockfish_var_eval_reward_func, 3.0, name="stockfish_eval")
-    combined_format_reward = _scale_reward_func(combined_format_reward_func, 0.5, name="combined_format")
-    token_penalty_reward = _scale_reward_func(token_penalty_reward_func, 1.0, name="token_penalty")
-    rationale_length_reward = _scale_reward_func(rationale_length_reward_func, 0.5, name="rationale_length")
+    stockfish_reward = _scale_reward_func(
+        stockfish_var_eval_reward_func, 3.0, name="stockfish_eval"
+    )
+    combined_format_reward = _scale_reward_func(
+        combined_format_reward_func, 0.5, name="combined_format"
+    )
+    token_penalty_reward = _scale_reward_func(
+        token_penalty_reward_func, 1.0, name="token_penalty"
+    )
+    rationale_length_reward = _scale_reward_func(
+        rationale_length_reward_func, 0.5, name="rationale_length"
+    )
     legality_reward = _scale_reward_func(legality_reward_func, 0.5, name="legality")
 
     trainer = GRPOTrainer(
