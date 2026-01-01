@@ -16,11 +16,11 @@ from src.config import (
     move_tag,
     rationale_tag,
 )
-from src.prompts import user_msg_pv_line
 from src.prompts import (
     conversation_system_msg,
     conversation_user_msg_after_move,
     conversation_user_msg_first,
+    user_msg_pv_line,
 )
 
 
@@ -108,17 +108,28 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
     assistant_color_name = "White" if assistant_is_white else "Black"
     user_color_name = "Black" if assistant_is_white else "White"
 
+    starting_legal_moves_uci = " ".join(m.uci() for m in board.legal_moves)
+    starting_side_to_move = "White" if board.turn == chess.WHITE else "Black"
+
     # Single system message explaining the rules and roles.
     # The rest of the conversation alternates user state updates and assistant moves.
     system_message = conversation_system_msg.format(
         assistant_color_name=assistant_color_name,
         user_color_name=user_color_name,
         starting_fen=fen,
+        starting_side_to_move=starting_side_to_move,
+        starting_legal_moves_uci=starting_legal_moves_uci,
     )
 
     messages = [{"role": "system", "content": system_message}]
     has_assistant_move = False
     last_user_move = None
+
+    # Randomly decide whether the first move is produced immediately by the assistant
+    # (only possible if it's the assistant's turn in the starting position).
+    start_with_assistant = (board.turn == assistant_color) and random.choice(
+        [True, False]
+    )
 
     for move_uci in moves:
         current_turn = board.turn
@@ -136,25 +147,33 @@ def create_conversation_example(line_data: Dict) -> Optional[Dict]:
             legal_moves = [m.uci() for m in board.legal_moves]
             legal_moves_uci = " ".join(legal_moves)
 
-            if last_user_move is None:
-                # Assistant moves first
-                user_content = conversation_user_msg_first.format(
-                    FEN=current_fen,
-                    legal_moves_uci=legal_moves_uci,
+            # If we decided to start with an assistant move, we skip the initial
+            # user state message for the very first assistant move only.
+            if last_user_move is None and start_with_assistant:
+                messages.append(
+                    {"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"}
                 )
+                start_with_assistant = False
             else:
-                # User moved, show their move then position
-                user_content = conversation_user_msg_after_move.format(
-                    last_user_move=last_user_move,
-                    FEN=current_fen,
-                    legal_moves_uci=legal_moves_uci,
-                )
+                if last_user_move is None:
+                    # Assistant moves first (user provides starting state)
+                    user_content = conversation_user_msg_first.format(
+                        FEN=current_fen,
+                        legal_moves_uci=legal_moves_uci,
+                    )
+                else:
+                    # User moved, show their move then position
+                    user_content = conversation_user_msg_after_move.format(
+                        last_user_move=last_user_move,
+                        FEN=current_fen,
+                        legal_moves_uci=legal_moves_uci,
+                    )
 
-            last_user_move = None
-            messages.append({"role": "user", "content": user_content})
-            messages.append(
-                {"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"}
-            )
+                last_user_move = None
+                messages.append({"role": "user", "content": user_content})
+                messages.append(
+                    {"role": "assistant", "content": f"<uci_move>{move_uci}</uci_move>"}
+                )
             has_assistant_move = True
         else:
             # User's turn - store move to show later
