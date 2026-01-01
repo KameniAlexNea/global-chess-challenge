@@ -10,7 +10,12 @@ import chess
 from datasets import Dataset, load_dataset
 from transformers import PreTrainedTokenizer
 
-from src.config import close_move_tag, close_rationale_tag, move_tag, rationale_tag
+from src.config import (
+    close_move_tag,
+    close_rationale_tag,
+    move_tag,
+    rationale_tag,
+)
 from src.prompts import user_msg_pv_line
 
 
@@ -324,7 +329,11 @@ def load_sft_single_move_dataset(
             if 0 <= pos < len(labels) and input_ids[pos] != tokenizer.pad_token_id:
                 labels[pos] = input_ids[pos]
 
-        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
 
     # Load dataset
     print(f"Loading dataset from {data_file}...")

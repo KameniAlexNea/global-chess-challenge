@@ -155,7 +155,9 @@ def ensure_chat_template(tokenizer, model_config=None):
     Returns:
         tokenizer: The tokenizer with chat_template set
     """
-    if tokenizer.chat_template is None: # Always resetting the chat_template : tokenizer.chat_template is None
+    if (
+        tokenizer.chat_template is None
+    ):  # Always resetting the chat_template : tokenizer.chat_template is None
         template = get_model_template(tokenizer, model_config)
         tokenizer.chat_template = template
 

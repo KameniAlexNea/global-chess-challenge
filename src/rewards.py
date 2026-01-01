@@ -5,7 +5,7 @@ from typing import Optional
 import chess
 import chess.engine
 
-from src.utils import extract_xml_answer, extract_rationale, extract_move
+from src.utils import extract_move, extract_rationale, extract_xml_answer
 
 # Constants
 MATE_THRESHOLD = 9000  # Centipawn threshold for mate detection (~90 pawns)
@@ -213,7 +213,7 @@ def stockfish_eval_reward_func(
     Compares move quality using centipawn evaluation from current position.
     Uses LRU caching for ~2x speedup on repeated positions.
     Short-circuits early for invalid/illegal moves to avoid expensive Stockfish calls.
-    
+
     Args:
         depth: Stockfish search depth. Use 1 early in training, 3+ later.
     """
@@ -224,7 +224,7 @@ def stockfish_eval_reward_func(
     ):
         # Short-circuit: extract move first (cheap)
         move = extract_move(completion)
-        
+
         if move is None:
             rewards.append(-3.0)  # Failed to extract - no Stockfish call needed
             continue
@@ -232,7 +232,7 @@ def stockfish_eval_reward_func(
         if move not in legal:
             rewards.append(-4.0)  # Illegal move - no Stockfish call needed
             continue
-        
+
         # Only call Stockfish for valid moves
         try:
 

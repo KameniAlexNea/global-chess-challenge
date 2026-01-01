@@ -1,106 +1,137 @@
-# GRPO Training on SFT Sequences - Implementation Summary
+# Training Guide (SFT + GRPO)
 
-## Overview
-Successfully implemented GRPO training using the SFT move sequences dataset with separate reward functions for rationale quality and move selection.
+This document explains how training works in this repo, end-to-end, using the **current** scripts.
 
-## Changes Made
+## What the model learns
 
-### 1. Independent XML Extraction (`src/utils.py`)
-Added two new functions that extract tags independently:
-- `extract_rationale()` - Extracts `<rationale>...</rationale>` content
-- `extract_move()` - Extracts `<uci_move>...</uci_move>` content
+All training stages teach the model to output two XML-like tags:
 
-These work independently so partial outputs still get appropriate rewards.
+1. `<rationale>...</rationale>`
+2. `<uci_move>...</uci_move>`
 
-### 2. New Reward Functions (`src/rewards.py`)
-Created 5 separate reward functions:
+The move must be a valid UCI move from the provided legal move list.
 
-1. **`rationale_format_reward_func`** - Rewards having rationale tags (±1.0)
-2. **`move_format_reward_func`** - Rewards having move tags (±1.0)
-3. **`rationale_length_reward_func`** - Rewards concise rationales:
-   - 1.0: One sentence, < 150 chars
-   - 0.5: Two sentences, < 200 chars
-   - -0.5: Too verbose
-4. **`legality_reward_func`** - Updated to use independent extraction:
-   - 1.0: Legal move
-   - -2.0: Illegal move
-   - -1.0: No move extracted
-5. **`stockfish_eval_reward_func`** - Updated to use independent extraction:
-   - 3.0: Perfect move (≤ 0 cp loss)
-   - 2.5-2.0: Excellent (0-75 cp loss)
-   - 1.5-0.5: Good to okay (75-300 cp loss)
-   - < 0.5: Poor move (> 300 cp loss)
-   - -4.0: Illegal move
+Prompts are built from [src/prompts.py](../src/prompts.py) and contain:
+- FEN
+- side to move
+- legal moves (UCI)
 
-### 3. GRPO Data Loader (`src/data.py`)
-Added `load_grpo_sequences_dataset()`:
-- Loads from `move_sequences_500mb.jsonl`
-- Randomly samples positions from Stockfish lines
-- Formats using `user_msg` template from `prompts.py`
-- Returns prompt with FEN, side to move, and legal moves
-- Not conversation format - single prompt/response
+## Setup
 
-### 4. Training Script (`train_grpo_sft.py`)
-New training script with:
-- Model: `models/chess-sft-fullsequences-fast/checkpoint-7000` (start from SFT)
-- Dataset: 50k samples from move sequences
-- 5 reward functions applied to each generation
-- GRPO config:
-  - 5000 steps
-  - Batch size: 8 × 4 accumulation = 32 effective
-  - 8 generations per prompt
-  - Temperature: 1.0 for exploration
-  - Max completion: 128 tokens (room for rationale + move)
-- Saves to `models/chess-grpo-sequences/`
+This repo is managed with `uv` (see [pyproject.toml](pyproject.toml)).
 
-### 5. Test Script (`test_grpo_setup.py`)
-Validation script that tests:
-- XML extraction functions
-- All 5 reward functions
-- Data loading
-- Sample outputs
-
-## Test Results
-✅ All extraction functions work correctly
-✅ Reward functions return expected values:
-- Correct format: [1.0, 0.0, 1.0, 1.0, 0.0]
-- Move format: [1.0, 1.0, 1.0, 1.0, 0.0]
-- Rationale length: [1.0, -0.5, -0.5, 1.0, -0.5]
-- Legality: [1.0, 1.0, 1.0, -2.0, -1.0]
-- Stockfish: [3.0, 3.0, 3.0, -4.0, -3.0]
-✅ Data loader successfully formats sequences as prompts
-
-## Training Command
 ```bash
-python train_grpo_sft.py
+uv sync
 ```
 
-Or with GPU selection:
+Stockfish is required for GRPO training (move-quality reward):
+
 ```bash
-CUDA_VISIBLE_DEVICES=0 python train_grpo_sft.py
+sudo apt-get update
+sudo apt-get install -y stockfish
 ```
 
-## Expected Behavior
-The model will learn to:
-1. Always use proper XML format (both tags)
-2. Write concise one-sentence rationales
-3. Only output legal moves
-4. Prefer moves with better Stockfish evaluation
-5. Balance exploration (temperature=1.0) with quality
+## Datasets used
 
-## Key Differences from Previous GRPO Training
-- **Data source**: Move sequences (Stockfish lines) instead of puzzles
-- **Format**: Single prompt instead of puzzle-specific format
-- **Rewards**: 5 separate rewards instead of 3
-- **Rationale focus**: Explicit reward for concise explanations
-- **Starting point**: Fine-tuned SFT model instead of base model
+All training in this repo uses the move sequence dataset:
 
-## Next Steps
-1. Run `python test_grpo_setup.py` to verify setup
-2. Start training with `python train_grpo_sft.py`
-3. Monitor WandB for:
-   - Reward trends (all 5 should increase)
-   - KL divergence (should stay controlled)
-   - Sample outputs (check format compliance)
-4. Evaluate checkpoints at 1000, 2500, 5000 steps
-5. Test final model on competition environment
+- `data/processed/move_sequences_500mb.jsonl` extracted from [lichess](https://database.lichess.org/#evals)
+
+Each row contains at least:
+- `fen`: starting position
+- `line`: a space-separated list of UCI moves (a strong line, e.g. Stockfish PV)
+
+The training scripts sample random split points inside each line to create many position->move examples.
+
+## Stage 1: SFT (single move + PV line)
+
+Goal: from a position, predict the next move and also output a short PV continuation.
+
+Target format (assistant output):
+
+`<rationale>{PV moves in UCI}</rationale><uci_move>{next move}</uci_move>`
+
+Important constraint: the move inside `<uci_move>` must be the **first** move of the PV in `<rationale>`.
+
+Implementation:
+- Dataset builder: [src/sft_data.py](../src/sft_data.py) `load_sft_single_move_dataset()`
+- Training script: [train_sft_single.py](../train_sft_single.py)
+
+Run (1 GPU):
+
+```bash
+uv run accelerate launch --num_processes 1 train_sft_single.py
+```
+
+Run (2 GPUs):
+
+```bash
+uv run accelerate launch --num_processes 2 train_sft_single.py
+```
+
+Outputs:
+- adapter: `models/chess-sft-single/adapter/`
+- merged model: `models/chess-sft-single/`
+
+## Stage 2: SFT (sequence / multi-turn)
+
+Goal: teach the model to play moves in a multi-turn setting. The dataset contains multiple turns; the model learns to emit `<uci_move>...</uci_move>` at each assistant turn.
+
+Implementation:
+- Dataset builder: [src/sft_data.py](../src/sft_data.py) `load_sft_sequences_dataset()`
+  - labels are masked so only tokens inside `<uci_move>...</uci_move>` are trained
+- Training script: [train_sft_conversation.py](../train_sft_conversation.py)
+
+Run (1 GPU):
+
+```bash
+uv run accelerate launch --num_processes 1 train_sft_conversation.py
+```
+
+Run (2 GPUs):
+
+```bash
+uv run accelerate launch --num_processes 2 train_sft_conversation.py
+```
+
+Outputs:
+- adapter: `models/chess-sft-conversation/adapter/`
+- merged model: `models/chess-sft-conversation/`
+
+## Stage 3: GRPO (reinforcement learning on sequences)
+
+Goal: improve move quality while keeping strict formatting.
+
+Implementation:
+- Dataset loader: [src/data.py](../src/data.py) `load_grpo_sequences_dataset()`
+- Training script: [train_grpo.py](../train_grpo.py)
+- Rewards: [src/rewards.py](../src/rewards.py)
+
+The GRPO trainer generates multiple candidate completions per prompt and scores them with reward functions:
+- format / tags present
+- brevity (token penalty)
+- rationale conciseness
+- legality (move must be legal)
+- Stockfish-based move quality (dominant signal)
+
+Run (1 GPU):
+
+```bash
+uv run accelerate launch --num_processes 1 train_grpo.py
+```
+
+Run (2 GPUs):
+
+```bash
+uv run accelerate launch --num_processes 2 train_grpo.py
+```
+
+Outputs:
+- adapter: `models/chess-grpo-sequences/adapter/`
+- merged model: `models/chess-grpo-sequences/`
+
+## Running a trained model
+
+See the repo-level README for copy/paste commands:
+- Quick local generation with Transformers
+- vLLM server + `global-chess-challenge-2025-starter-kit/local_evaluation.py`
