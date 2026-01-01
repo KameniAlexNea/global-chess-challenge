@@ -34,3 +34,30 @@ If no legal moves exist, output only: use 0000 for null moves
 
 Do NOT include any other text, explanations, or formatting.
 """
+
+
+# Variant used for SFT where we want the model to emit a short PV line.
+# The immediate next move must be duplicated as the first move of the PV.
+user_msg_pv_line = f"""Internally analyze the given chess position and select the best move for the side to move.
+
+# Context
+You will receive:
+- **Position (FEN):**
+{{FEN}}
+- **Side to Move:** (either 'White' or 'Black')
+{{side_to_move}}
+- **Legal Moves:** (space-separated UCI moves)
+{{legal_moves_uci}}
+
+# Task
+Select the best move from the provided legal moves list.
+
+Return exactly:
+1. `{rationale_tag}...{close_rationale_tag}` - A short best-line continuation as space-separated UCI moves (a PV). The FIRST move in this PV must be the same as the move you output in `{move_tag}...{close_move_tag}`.
+2. `{move_tag}xxxx{close_move_tag}` - The selected valid move in UCI format (the next move to play).
+
+If no legal moves exist, output only:
+`{rationale_tag}no legal moves available{close_rationale_tag}{move_tag}0000{close_move_tag}`
+
+Do NOT include any other text, explanations, or formatting.
+"""

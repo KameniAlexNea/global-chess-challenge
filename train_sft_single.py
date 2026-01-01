@@ -40,6 +40,7 @@ sft_train, sft_eval = load_sft_single_move_dataset(
     train_samples=500_000,
     test_size=0.01,
     max_length=512,  # Reduced from 1024 for speed
+    line_k=6,
     num_proc=16,
     seed=42,
 )
