@@ -49,6 +49,7 @@ def _wait_for_everyone() -> None:
 
 
 NAME = "unsloth/gemma-3-270m-it-unsloth-bnb-4bit"
+NAME = "models/chess-sft-conversation/merged-checkpoint-3000"
 
 
 def main() -> None:
@@ -63,7 +64,7 @@ def main() -> None:
     sft_train, sft_eval = load_sft_single_move_dataset(
         tokenizer=tokenizer,
         data_file="data/processed/move_sequences_500mb.jsonl",
-        train_samples=500_000,
+        train_samples=2_500_000,
         test_size=0.01,
         max_length=512,  # Reduced from 1024 for speed
         line_k=6,
@@ -117,10 +118,10 @@ def main() -> None:
         gradient_accumulation_steps=4,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
-        warmup_steps=500,
-        logging_steps=50,
-        save_steps=1000,
-        eval_steps=1000,
+        warmup_steps=1000,
+        logging_steps=100,
+        save_steps=5000,
+        eval_steps=5000,
         eval_strategy="steps",
         bf16=True,
         gradient_checkpointing=False,  # DISABLED - much faster

@@ -27,12 +27,18 @@ tpu_use_sudo: false
 use_cpu: false
 EOT
 
-echo "🚀 Launching GRPO training on $NUM_GPUS GPUs..."
+# echo "🚀 Launching GRPO training on $NUM_GPUS GPUs..."
 
+# Launch command
+# nohup accelerate launch \
+#     --config_file $CONFIG_FILE \
+#     train_grpo.py &> nohup.out &
+
+echo "🚀 Launching SFT training on $NUM_GPUS GPUs..."
 # Launch command
 nohup accelerate launch \
     --config_file $CONFIG_FILE \
-    train_grpo.py &> nohup.out &
+    train_sft_single.py &> nohup.out &
 
 # Cleanup (optional)
 # rm $CONFIG_FILE
