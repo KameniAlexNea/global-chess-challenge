@@ -26,9 +26,8 @@ from src.data import load_grpo_sequences_dataset
 from src.rewards import (
     combined_format_reward_func,
     legality_reward_func,
-    rationale_length_reward_func,
+    rationale_quality_reward_func,
     stockfish_eval_reward_func,
-    token_penalty_reward_func,
 )
 from src.tokenizer_utils import ensure_chat_template
 
@@ -183,7 +182,7 @@ def main() -> None:
     print("  5. Stockfish eval (move quality vs best move, depth=1 early training)")
     print("=" * 80 + "\n")
 
-    # Use depth=1 for first 500 steps, then depth=3
+    # Stockfish depth: start shallow, go deeper later (cheap early training).
     current_depth = 1 if training_args.max_steps <= 500 else 3
     print(f"Using Stockfish depth={current_depth}")
 
@@ -198,11 +197,13 @@ def main() -> None:
     combined_format_reward = _scale_reward_func(
         combined_format_reward_func, 0.5, name="combined_format"
     )
-    token_penalty_reward = _scale_reward_func(
-        token_penalty_reward_func, 1.0, name="token_penalty"
-    )
-    rationale_length_reward = _scale_reward_func(
-        rationale_length_reward_func, 0.5, name="rationale_length"
+    # Encourage a minimally-informative rationale (avoid one-word rationales).
+    rationale_quality_reward = _scale_reward_func(
+        lambda completions, **kwargs: rationale_quality_reward_func(
+            completions, min_chars=40, max_chars=220, **kwargs
+        ),
+        0.5,
+        name="rationale_quality",
     )
     legality_reward = _scale_reward_func(legality_reward_func, 0.5, name="legality")
 
@@ -211,8 +212,7 @@ def main() -> None:
         processing_class=tokenizer,
         reward_funcs=[
             combined_format_reward,
-            token_penalty_reward,
-            rationale_length_reward,
+            rationale_quality_reward,
             legality_reward,
             stockfish_reward,
         ],
