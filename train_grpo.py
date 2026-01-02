@@ -19,6 +19,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    TrainerCallback,
 )
 from trl import GRPOConfig, GRPOTrainer
 
@@ -30,6 +31,57 @@ from src.rewards import (
     stockfish_eval_reward_func,
 )
 from src.tokenizer_utils import ensure_chat_template
+
+_STOCKFISH_DEPTH = 3
+
+
+def _parse_depth_schedule(spec: str) -> list[tuple[int, int]]:
+    """Parse a schedule like '0:1,500:2,1500:3' into sorted (step, depth)."""
+    spec = (spec or "").strip()
+    if not spec:
+        return [(0, 3)]
+
+    items: list[tuple[int, int]] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        step_s, depth_s = part.split(":", 1)
+        step = int(step_s.strip())
+        depth = int(depth_s.strip())
+        if step < 0 or depth <= 0:
+            raise ValueError(f"Invalid schedule entry: {part}")
+        items.append((step, depth))
+
+    items.sort(key=lambda x: x[0])
+    if items[0][0] != 0:
+        items.insert(0, (0, items[0][1]))
+    return items
+
+
+def _depth_for_step(step: int, schedule: list[tuple[int, int]]) -> int:
+    depth = schedule[0][1]
+    for s, d in schedule:
+        if step >= s:
+            depth = d
+        else:
+            break
+    return depth
+
+
+class _StockfishDepthSchedulerCallback(TrainerCallback):
+    def __init__(self, schedule: list[tuple[int, int]]):
+        self._schedule = schedule
+        self._last_depth: int | None = None
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        global _STOCKFISH_DEPTH
+        depth = _depth_for_step(int(state.global_step), self._schedule)
+        _STOCKFISH_DEPTH = depth
+        if self._last_depth != depth and state.is_world_process_zero:
+            print(f"[stockfish] depth -> {depth} (step={state.global_step})")
+            self._last_depth = depth
+        return control
 
 
 def _require_ddp_if_multi_gpu() -> None:
@@ -69,7 +121,7 @@ def _scale_reward_func(reward_func, weight: float, name: str | None = None):
     return scaled
 
 
-NAME = "unsloth/Qwen2.5-Coder-0.5B-Instruct-bnb-4bit"
+NAME = "models/chess-sft-conversation/merged-checkpoint-3000"
 
 
 def main() -> None:
@@ -77,7 +129,7 @@ def main() -> None:
     model_name = NAME  # Start from SFT checkpoint
     tokenizer_name = NAME
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, fix_mistral_regex=True)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     tokenizer = ensure_chat_template(tokenizer)
 
     # Load sequences dataset
@@ -117,7 +169,7 @@ def main() -> None:
         output_dir="models/chess-grpo-sequences",
         learning_rate=5e-6,  # Lower LR for stability
         lr_scheduler_type="cosine",
-        logging_steps=20,
+        logging_steps=50,
         max_steps=2500,
         per_device_train_batch_size=24,  # Reduced for faster iterations
         gradient_accumulation_steps=2,  # Maintain effective batch size
@@ -175,19 +227,20 @@ def main() -> None:
     print("\n" + "=" * 80)
     print("Creating GRPO Trainer...")
     print("Reward functions:")
-    print("  1. Combined format (both <rationale> and <uci_move> tags)")
-    print("  2. Token penalty (discourage verbosity)")
-    print("  3. Rationale length (concise, one sentence)")
-    print("  4. Legality (move is legal)")
-    print("  5. Stockfish eval (move quality vs best move, depth=1 early training)")
+    print("  1. Combined format (<rationale> + <uci_move>)")
+    print("  2. Rationale quality (min length + basic heuristics)")
+    print("  3. Legality (move is legal)")
+    print("  4. Stockfish eval (move quality vs precomputed best move)")
     print("=" * 80 + "\n")
 
-    # Stockfish depth: start shallow, go deeper later (cheap early training).
-    current_depth = 1 if training_args.max_steps <= 500 else 3
-    print(f"Using Stockfish depth={current_depth}")
+    # Actual Stockfish depth curriculum over *training steps*.
+    # Default matches the intent of the earlier comment: start cheap, then increase.
+    schedule_spec = os.environ.get("STOCKFISH_DEPTH_SCHEDULE", "0:1,500:3")
+    schedule = _parse_depth_schedule(schedule_spec)
+    print(f"Stockfish depth schedule: {schedule_spec}")
 
     def stockfish_var_eval_reward_func(completions, **kwargs):
-        return stockfish_eval_reward_func(completions, depth=current_depth, **kwargs)
+        return stockfish_eval_reward_func(completions, depth=_STOCKFISH_DEPTH, **kwargs)
 
     # Reward weights: make Stockfish the dominant signal while keeping
     # format/legality constraints as shaping rewards.
@@ -210,6 +263,7 @@ def main() -> None:
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
+        callbacks=[_StockfishDepthSchedulerCallback(schedule)],
         reward_funcs=[
             combined_format_reward,
             rationale_quality_reward,
@@ -236,27 +290,22 @@ def main() -> None:
     if not trainer.is_world_process_zero():
         return
 
-    # Save adapter
+    # Save adapter (safe for 4-bit QLoRA training)
     adapter_path = training_args.output_dir + "/adapter"
     trainer.model.save_pretrained(adapter_path)
     tokenizer.save_pretrained(adapter_path)
 
-    # Merge and save full model
-    print("\nMerging adapter with base model...")
-    merged_model = trainer.model.merge_and_unload()
-    merged_model.save_pretrained(training_args.output_dir)
-    tokenizer.save_pretrained(training_args.output_dir)
-    print(f"Full model saved to {training_args.output_dir}")
+    print("\nAdapter saved.")
+    print("To merge into a full bf16 model (recommended), run:")
+    print(f"  python push_full_model.py --adapter_dir {adapter_path} --no_push")
 
     # Test the trained model
     print("\n" + "=" * 80)
     print("Testing trained model on random examples...")
     print("=" * 80 + "\n")
 
-    # Load on a single GPU for ad-hoc testing.
-    test_model = AutoModelForCausalLM.from_pretrained(
-        training_args.output_dir, dtype=torch.bfloat16, device_map={"": 0}
-    )
+    # Ad-hoc testing: use the trained adapter model directly (no merge required).
+    test_model = trainer.model
 
     for i in range(3):
         index = random.randint(0, len(test_dataset) - 1)
