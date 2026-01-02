@@ -86,7 +86,9 @@ def create_single_move_example(line_data: Dict, line_k: int = 6) -> Dict:
     return {"prompt": prompt_text, "response": response}
 
 
-def create_conversation_example(line_data: Dict, max_user_moves: int = 2) -> Optional[Dict]:
+def create_conversation_example(
+    line_data: Dict, max_user_moves: int = 2
+) -> Optional[Dict]:
     """
     Create a full multi-turn conversation from a move sequence.
 
@@ -494,9 +496,7 @@ def load_sft_sequences_dataset(
         }
 
         # Create conversation
-        result = create_conversation_example(
-            line_data, max_user_moves=max_user_moves
-        )
+        result = create_conversation_example(line_data, max_user_moves=max_user_moves)
 
         if result is None:
             return {

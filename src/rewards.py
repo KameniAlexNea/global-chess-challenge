@@ -1,6 +1,6 @@
-import os
 import atexit
 import math
+import os
 import re
 import shutil
 from functools import lru_cache
@@ -92,6 +92,7 @@ def combined_format_reward_func(completions, **kwargs):
     Reduces variance from correlated rewards.
     +2.0 if both present, -1.0 otherwise.
     """
+
     def _score_move(completion):
         try:
             rationale = extract_rationale(completion)
@@ -104,10 +105,8 @@ def combined_format_reward_func(completions, **kwargs):
                 return -1.0
         except:
             return -1.0
-    rewards = [
-        _score_move(completion)
-        for completion in completions
-    ]
+
+    rewards = [_score_move(completion) for completion in completions]
     return rewards
 
 
@@ -152,21 +151,21 @@ def rationale_quality_reward_func(
         "tactic",
     )
 
-    keyword_patterns = [re.compile(r"\\b" + re.escape(k) + r"\\b", re.IGNORECASE) for k in chess_keywords]
+    keyword_patterns = [
+        re.compile(r"\\b" + re.escape(k) + r"\\b", re.IGNORECASE)
+        for k in chess_keywords
+    ]
 
-    rewards = []
-    for completion in completions:
+    def _score_rationale(completion):
         try:
             rationale = extract_rationale(completion)
             if rationale is None:
-                rewards.append(-1.0)
-                continue
+                return -1.0
 
             r = rationale.strip()
             length = len(r)
             if length == 0:
-                rewards.append(-1.0)
-                continue
+                return -1.0
 
             # Sentence-ish count (still heuristic, but less brittle than splitting only on '.')
             sentence_count = len([s for s in re.split(r"[.!?]+", r) if s.strip()])
@@ -199,9 +198,11 @@ def rationale_quality_reward_func(
             keyword_bonus = min(0.2, 0.05 * found_keywords)
             reward += keyword_bonus
 
-            rewards.append(float(reward))
+            return float(reward)
         except Exception:
-            rewards.append(-0.5)
+            return -0.5
+
+    rewards = [_score_rationale(completion) for completion in completions]
 
     return rewards
 
@@ -212,6 +213,7 @@ def legality_reward_func(completions, legal_moves, **kwargs):
     This is a hard constraint - model must learn chess rules first.
     Uses independent move extraction.
     """
+
     def _score_move(completion, legal):
         try:
             move = extract_move(completion)
@@ -224,6 +226,7 @@ def legality_reward_func(completions, legal_moves, **kwargs):
                 return -2.0  # Heavy penalty for illegal moves
         except:
             return -1.0
+
     rewards = [
         _score_move(completion, legal)
         for completion, legal in zip(completions, legal_moves)
@@ -243,6 +246,7 @@ def stockfish_eval_reward_func(
     Args:
         depth: Stockfish search depth. Use 1 early in training, 3+ later.
     """
+
     def _compute_reward(completion, correct, position_fen, legal):
         # Short-circuit: extract move first (cheap)
         move = extract_move(completion)
@@ -275,7 +279,7 @@ def stockfish_eval_reward_func(
         except (ValueError, chess.IllegalMoveError, KeyError) as e:
             print(f"Error in stockfish eval: {e}")
             return -1.0
-    
+
     rewards = [
         _compute_reward(completion, correct, position_fen, legal)
         for completion, correct, position_fen, legal in zip(

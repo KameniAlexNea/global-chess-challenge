@@ -130,7 +130,7 @@ def main() -> None:
         dataloader_num_workers=4,
         dataloader_pin_memory=True,
         ddp_find_unused_parameters=False,
-        torch_compile=True
+        torch_compile=True,
     )
 
     trainer = Trainer(
