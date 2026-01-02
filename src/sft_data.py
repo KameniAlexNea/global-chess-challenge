@@ -39,10 +39,10 @@ def create_single_move_example(line_data: Dict, line_k: int = 6) -> Dict:
     Randomly pick a split point in the line and create training example.
 
         This creates a single Q&A pair: given a position, predict the next best move
-        and provide a short principal-variation style continuation.
+        and provide a principal-variation style continuation.
 
         Target format:
-            <rationale>{k-move PV in UCI}</rationale><uci_move>{next_move}</uci_move>
+            <rationale>{PV in UCI}</rationale><uci_move>{next_move}</uci_move>
     """
     fen = line_data["fen"]
     moves = line_data["line"].split()
@@ -57,9 +57,12 @@ def create_single_move_example(line_data: Dict, line_k: int = 6) -> Dict:
     # Get next move to predict
     next_move = moves[split_idx]
 
-    # PV continuation from this position (includes next_move as first move)
+    # PV continuation from this position (includes next_move as first move).
+    # If line_k <= 0, include the full remaining continuation from the source line.
     if line_k <= 0:
-        pv_moves: list[str] = [next_move]
+        pv_moves = moves[split_idx:]
+        if not pv_moves:
+            pv_moves = [next_move]
     else:
         pv_moves = moves[split_idx : split_idx + line_k]
         if not pv_moves:
@@ -313,6 +316,7 @@ def load_sft_single_move_dataset(
     test_size: float = 0.01,
     max_length: int = 512,
     line_k: int = 6,
+    eval_max_samples: int = 2000,
     num_proc: int = 16,
     seed: int = 42,
 ):
@@ -347,47 +351,65 @@ def load_sft_single_move_dataset(
         # Create training example with random split
         training_example = create_single_move_example(line_data, line_k=line_k)
 
-        # Build prompt token IDs using the chat template.
-        # IMPORTANT: We reserve space for the response so it doesn't get truncated away.
-        messages = [{"role": "user", "content": training_example["prompt"]}]
-        prompt_ids = tokenizer.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=True
-        )
-        response_ids = tokenizer(
-            training_example["response"] + tokenizer.eos_token,
-            add_special_tokens=False,
-        )["input_ids"]
+        user_msg = {"role": "user", "content": training_example["prompt"]}
 
-        # Truncate prompt to leave room for the response.
-        if len(prompt_ids) + len(response_ids) > max_length:
-            keep = max_length - len(response_ids)
-            if keep < 0:
-                # Degenerate case: response alone exceeds max_length.
-                response_ids = response_ids[:max_length]
-                prompt_ids = []
-            else:
-                prompt_ids = prompt_ids[:keep]
+        # Tokenize prompt and response separately.
+        # This gives an exact, template-correct boundary index for label masking.
+        def _chat_to_ids(messages: list[dict], add_generation_prompt: bool) -> list[int]:
+            try:
+                ids = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=True,
+                    add_generation_prompt=add_generation_prompt,
+                )
+                # HF returns either a list[int] or a BatchEncoding-like dict.
+                if isinstance(ids, dict):
+                    return list(ids["input_ids"])
+                return list(ids)
+            except TypeError:
+                # Back-compat for tokenizers that don't support tokenize=True.
+                text = tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=add_generation_prompt
+                )
+                return tokenizer(text, add_special_tokens=False)["input_ids"]
+
+        prompt_ids = _chat_to_ids([user_msg], add_generation_prompt=True)
+        response_ids = tokenizer(training_example["response"], add_special_tokens=False)[
+            "input_ids"
+        ]
 
         input_ids = prompt_ids + response_ids
-        attention_mask = [1] * len(input_ids)
 
-        # Pad to max_length.
-        if len(input_ids) < max_length:
-            pad_len = max_length - len(input_ids)
-            input_ids = input_ids + [tokenizer.pad_token_id] * pad_len
+        # Ensure we have a single EOS at the end (if the model uses one).
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+        if eos_id is not None and (not input_ids or input_ids[-1] != eos_id):
+            input_ids.append(eos_id)
+
+        # Right-side truncation (keep the FEN / board state at the start).
+        if len(input_ids) > max_length:
+            input_ids = input_ids[:max_length]
+
+        unpadded_len = len(input_ids)
+        attention_mask = [1] * unpadded_len
+
+        # Labels: train only on the assistant response (everything after the prompt).
+        labels = [-100] * unpadded_len
+        mask_start_idx = min(len(prompt_ids), unpadded_len)
+        for pos in range(mask_start_idx, unpadded_len):
+            labels[pos] = input_ids[pos]
+
+        # Right padding to max_length.
+        pad_id = getattr(tokenizer, "pad_token_id", None)
+        if pad_id is None:
+            pad_id = eos_id if eos_id is not None else 0
+
+        pad_len = max_length - unpadded_len
+        if pad_len > 0:
+            input_ids = input_ids + [pad_id] * pad_len
             attention_mask = attention_mask + [0] * pad_len
+            labels = labels + [-100] * pad_len
 
-        # Labels: only train on the response portion.
-        labels = [-100] * len(input_ids)
-        for pos in range(len(prompt_ids), len(prompt_ids) + len(response_ids)):
-            if 0 <= pos < len(labels) and input_ids[pos] != tokenizer.pad_token_id:
-                labels[pos] = input_ids[pos]
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        }
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
     # Load dataset
     print(f"Loading dataset from {data_file}...")
@@ -402,6 +424,11 @@ def load_sft_single_move_dataset(
     # Train/test split
     dataset = full_dataset.train_test_split(test_size=test_size, seed=seed)
     print(f"Loaded {len(dataset['train'])} train | {len(dataset['test'])} test lines")
+
+    # Cap eval set for speed; large eval sets can stall training for a long time.
+    if eval_max_samples and len(dataset["test"]) > eval_max_samples:
+        dataset["test"] = dataset["test"].select(range(int(eval_max_samples)))
+        print(f"Capped eval set to {len(dataset['test'])} samples")
 
     # Preprocess with .map()
     print(f"Preprocessing dataset with {num_proc} workers...")

@@ -48,12 +48,12 @@ def _wait_for_everyone() -> None:
         torch.distributed.barrier()
 
 
-NAME = "unsloth/gemma-3-270m-it-unsloth-bnb-4bit"
-NAME = "models/chess-sft-conversation/merged-checkpoint-3000"
+DEFAULT_MODEL_NAME = "models/chess-sft-conversation/merged-checkpoint-3000"
 
 
 def main() -> None:
-    model_name = NAME
+    # Use a single source of truth for the model name to avoid accidental overrides.
+    model_name = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
     tokenizer = ensure_chat_template(tokenizer)
@@ -61,13 +61,17 @@ def main() -> None:
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load dataset
+    line_k = int(os.environ.get("SFT_LINE_K", "5"))
+    eval_max_samples = int(os.environ.get("SFT_EVAL_MAX_SAMPLES", "2000"))
+
     sft_train, sft_eval = load_sft_single_move_dataset(
         tokenizer=tokenizer,
         data_file="data/processed/move_sequences_500mb.jsonl",
         train_samples=2_500_000,
         test_size=0.01,
         max_length=512,  # Reduced from 1024 for speed
-        line_k=6,
+        line_k=line_k,
+        eval_max_samples=eval_max_samples,
         num_proc=16,
         seed=42,
     )
@@ -157,11 +161,9 @@ def main() -> None:
     trainer.model.save_pretrained(adapter_path)
     tokenizer.save_pretrained(adapter_path)
 
-    # Merge and save full model
-    merged = trainer.model.merge_and_unload()
-    merged.save_pretrained(training_args.output_dir)
-    tokenizer.save_pretrained(training_args.output_dir)
-
+    print("\nAdapter saved.")
+    print("To merge into a full bf16 model (recommended), run:")
+    print(f"  python push_full_model.py --adapter_dir {adapter_path} --no_push")
     print("Training complete!")
 
 
